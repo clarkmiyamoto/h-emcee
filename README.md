@@ -1,2 +1,2 @@
 # h-emcee
-Affine Invariant gradient-based samplers in JAX
+Affine invariant Hamiltonian (gradient-based) samplers in JAX
