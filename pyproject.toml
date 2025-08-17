@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "h-emcee"
 version = "0.0.0"
 description = "Affine invariant Hamiltonian samplers in JAX"
-authors = [{name = "Community"}]
+authors = [{name = "Clark Miyamoto"}, {name = "Yifan Chen"}]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["jax", "jaxlib"]
