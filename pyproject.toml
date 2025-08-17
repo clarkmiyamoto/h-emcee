@@ -8,7 +8,7 @@ version = "0.0.0"
 description = "Affine invariant Hamiltonian samplers in JAX"
 authors = [{name = "Clark Miyamoto"}]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = ["jax", "jaxlib"]
 
 [tool.setuptools.packages.find]
