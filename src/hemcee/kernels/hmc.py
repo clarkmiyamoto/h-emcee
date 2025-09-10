@@ -1,10 +1,5 @@
 import jax 
 import jax.numpy as jnp
-from tqdm import tqdm
-
-import jax
-import jax.numpy as jnp
-
 from typing import Callable, Optional
 
 
@@ -51,8 +46,8 @@ def leapfrog(x: jnp.ndarray, p: jnp.ndarray, grad_fn: callable, step_size: float
     
 def hmc(log_prob: Callable,
         initial: jnp.ndarray,
-        grad_fn : Optional[Callable] = None,
         n_samples: int,
+        grad_fn : Optional[Callable] = None,
         step_size: float = 0.1,
         L: int = 10,
         n_chains: int = 1,
@@ -145,9 +140,12 @@ def hmc(log_prob: Callable,
     carry, samples = jax.lax.scan(
         main_loop, 
         init=(chains_init, accepts_init), 
-        xs=(p_rngs[1:], acceptance_rngs) # Removed the first momentum as it's already in the initial state
+        xs=(p_rngs[1:], acceptance_rngs) 
     )
     accepts = carry[1]
+
+    # Transpose samples to get the correct shape: (n_chains, n_samples, dim)
+    samples = jnp.transpose(samples, (1, 0, 2))
 
     # Calculate acceptance rates for all chains
     acceptance_rates = accepts / total_iterations

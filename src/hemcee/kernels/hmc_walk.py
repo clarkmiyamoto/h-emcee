@@ -13,7 +13,7 @@ def leapfrog_walk_move(q: jnp.ndarray,
         q: Shape (n_chains_per_group, dim)
         p: Shape (n_chinas_per_group, n_chains_per_group)
         grad_fn: Gradient of log probabiltiy vectorized. Maps (batch_size, dim) -> (batch_size, dim)
-        beta_eps: beta times step size (epsilon)
+        beta_eps: beta times step size (step_size)
         L: Number of steps
         centered: Shape (n_chains_per_group, dim)
     '''
@@ -44,7 +44,7 @@ def hamiltonian_walk_move(potential_func: Callable,
                           n_samples: int, 
                           grad_fn: Callable = None,
                           n_chains_per_group: int = 5, 
-                          epsilon: float = 0.01, 
+                          step_size: float = 0.01, 
                           L: int = 10, 
                           beta: float = 0.05,
                           n_thin=1,
@@ -76,7 +76,7 @@ def hamiltonian_walk_move(potential_func: Callable,
     keys_per_iter = 4
     all_keys = jax.random.split(key, total_iterations * keys_per_iter).reshape(total_iterations, keys_per_iter, 2)
 
-    beta_eps = beta * epsilon
+    beta_eps = beta * step_size
 
     def main_loop(carry, keys):
         #---------------------------------------------

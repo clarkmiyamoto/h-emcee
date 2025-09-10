@@ -55,7 +55,7 @@ def hamiltonian_side_move(potential_func: Callable,
                           n_samples: int,
                           grad_fn: Callable = None, 
                           n_chains_per_group: int = 5,
-                          epsilon: float = 0.01, 
+                          step_size: float = 0.01, 
                           L: int = 10, 
                           beta: float = 1.0,
                           n_thin = 1,
@@ -76,7 +76,7 @@ def hamiltonian_side_move(potential_func: Callable,
         n_samples: Number of samples to generate per chain
         n_chains_per_group: Number of chains in each of the two groups. Total number of chains
                            will be 2 * n_chains_per_group. Default: 5
-        epsilon: Step size for the leapfrog integrator. Controls the discretization of
+        step_size: Step size for the leapfrog integrator. Controls the discretization of
                 Hamiltonian dynamics. Default: 0.01
         L: Number of leapfrog steps per proposal. Controls how far each proposal
                    can move. Default: 10
@@ -135,7 +135,7 @@ def hamiltonian_side_move(potential_func: Callable,
     accepts = jnp.zeros(total_chains)
 
     # Precompute some constants for efficiency
-    beta_eps = beta * epsilon
+    beta_eps = beta * step_size
 
     keys_per_iter = 6
     all_keys = jax.random.split(key, total_iterations * keys_per_iter).reshape(total_iterations, keys_per_iter, 2)

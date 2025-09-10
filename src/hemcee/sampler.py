@@ -1,15 +1,12 @@
-"""Minimal emcee-like sampler implemented in JAX."""
 from __future__ import annotations
 
 from typing import Callable, Optional, Sequence, Tuple
 
 
 class HamiltonianEnsembleSampler:
-    """Simplified affine-invariant sampler.
-
+    """
     This class mimics the API of ``emcee.EnsembleSampler`` but delegates
-    the actual work to JAX.  The implementation here is intentionally
-    minimal and meant only as boilerplate.
+    the actual work to JAX.
     """
 
     def __init__(
@@ -29,7 +26,8 @@ class HamiltonianEnsembleSampler:
         self.log_prob = None
 
     def run_mcmc(self, key, initial_state, nsteps: int) -> Tuple["jax.Array", "jax.Array"]:
-        """Execute a very small MCMC loop.
+        """
+        Execute a very small MCMC loop.
 
         Parameters
         ----------
