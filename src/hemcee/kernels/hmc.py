@@ -127,7 +127,8 @@ def hmc(log_prob: Callable,
         proposal_K = 0.5 * jnp.sum(p**2, axis=1)        # Shape (n_chains,)
 
         dH = (proposal_log_probs + proposal_K) - (current_log_probs + current_K)
-        log_accept_prob = jnp.minimum(0.0, dH) # Shape (n_chains,)
+        log_accept_prob = jnp.minimum(0.0, -dH) # Shape (n_chains,)
+
 
         # Create mask for accepted proposals. True means accept the proposal, false means reject the proposal
         accept_mask = log_u < log_accept_prob # Shape (n_chains,)
