@@ -7,7 +7,17 @@ class DAState(NamedTuple):
     H_bar: jnp.ndarray
     log_epsilon_bar: jnp.ndarray
 
-def da_cond_update(iteration, warmup_length, accept_prob, *, target_accept, t0, mu, gamma, kappa, state: DAState):
+def da_cond_update(
+    iteration: int, 
+    warmup_length: int, 
+    accept_prob: float, 
+    target_accept: float, 
+    t0: float, 
+    mu: float, 
+    gamma: float, 
+    kappa: float, 
+    state: DAState
+    ):
     '''
     Update the dual averaging state
     '''

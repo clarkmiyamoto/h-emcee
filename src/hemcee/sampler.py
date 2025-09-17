@@ -4,12 +4,14 @@ from typing import Callable, Optional, Sequence, Tuple
 import jax
 import jax.numpy as jnp
 
-from hemcee.dual_averaging import DAState
-from hemcee.moves.hmc_walk import hmc_walk
+from hemcee.dual_averaging import DAState, da_cond_update
+from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
+from hemcee.moves.vanilla.walk import walk_move
+
 
 class HamiltonianEnsembleSampler:
     """
-    For Hamiltonian Ensemble samplers. Walk + slide HMC
+    Hamiltonian Ensemble samplers. 
     """
 
     def __init__(
@@ -20,8 +22,12 @@ class HamiltonianEnsembleSampler:
         grad_log_prob: Callable = None,
         step_size: float = 0.2,
         L: int = 10,
-        beta: float = 1.0,
-        move = hmc_walk,
+        move = hmc_walk_move,
+        target_accept: float = 0.8, # Dual Averaging parameters
+        t0: float = 10.0,
+        mu: float = 0.05,
+        gamma: float = 0.05,
+        kappa: float = 0.75,
     ) -> None:
         self.total_chains = int(total_chains)
         if self.total_chains < 4:
@@ -37,9 +43,15 @@ class HamiltonianEnsembleSampler:
         
         self.step_size = step_size
         self.L = L
-        self.beta = beta
 
         self.move = move
+
+        # Dual Averaging parameters
+        self.target_accept = target_accept
+        self.t0 = t0
+        self.mu = mu
+        self.gamma = gamma
+        self.kappa = kappa
 
     def run_mcmc(self, 
                key: jax.random.PRNGKey,
@@ -103,11 +115,10 @@ class HamiltonianEnsembleSampler:
         group2 = initial_state[group1_size:]
         
         # Initialize dual averaging if needed
-        H_bar = 0.0
         da_state = DAState(
             step_size=self.step_size,
-            H_bar=H_bar,
-            log_epsilon_bar=jnp.log(self.step_size)
+            H_bar=jnp.array(0.0, dtype=jnp.float_),
+            log_epsilon_bar=jnp.array(jnp.log(self.step_size), dtype=jnp.float_)
         )
 
         
@@ -125,7 +136,7 @@ class HamiltonianEnsembleSampler:
             group1, group2, da_state, diagnostics = carry
             keys, iteration = keys_and_iter
 
-            #### Group A / Group B Update
+            #### Group 1 / Group 2 Update
             # Update group 1 using group 2 as complement
             group1, accept1 = self.move(group1, group2, 
                 da_state, keys[0],
@@ -145,8 +156,10 @@ class HamiltonianEnsembleSampler:
             current_accept_rate = jnp.mean(all_accepts)
             
             #### Dual Averaging (simplified for now - no adaptation)
-            # For now, we'll keep the step size fixed
-            # TODO: Implement proper dual averaging with DAState
+            da_state = da_cond_update(iteration, warmup, 
+                current_accept_rate, target_accept=self.target_accept, 
+                t0=self.t0, mu=self.mu, gamma=self.gamma, kappa=self.kappa, 
+            state=da_state)
             
             #### Construct return state
             final_states = jnp.concatenate([group1, group2])
@@ -175,3 +188,106 @@ class HamiltonianEnsembleSampler:
             post_warmup_samples = post_warmup_samples[::thin_by]
         
         return post_warmup_samples, diagnostics
+
+class EnsembleSampler:
+
+    def __init__(
+        self,
+        total_chains: int,
+        dim: int,
+        log_prob: Callable,
+        move = walk_move,
+    ) -> None:
+        self.total_chains = int(total_chains)
+        if self.total_chains < 4:
+            raise ValueError("`self.total_chains` must be at least 4 to form meaningful ensemble groups")
+
+        self.dim = int(dim)
+
+        self.log_prob = jax.jit(jax.vmap(log_prob))
+        self.move = move
+
+    def run_mcmc(self, 
+               key: jax.random.PRNGKey,
+               initial_state: jnp.ndarray, 
+               num_samples: int,
+               warmup: int = 1000,
+               thin_by=1,
+               show_progress: bool = False,
+               **kwargs
+               ) -> Tuple[jnp.ndarray, dict]:
+        '''
+        Args
+        
+        Args:
+            key: JAX random key for reproducibility. Default: jax.random.PRNGKey(0)
+            initial_state: Initial state
+            num_samples: Number of post-warmup samples
+            warmup: Number of warmup samples.
+            thin_by: Drops every `thin_by` number of samples. Default: 1 (no thinning).
+            show_progress: Whether to show progress bar. 
+                NOTE: THIS WILL SIGNIFICANTLY DEGRADE PERFORMANCE!
+        '''
+        if show_progress:
+            raise NotImplementedError("`show_progress=True` is not supported yet")
+        
+        if thin_by < 1:
+            raise ValueError("`thinning` must 1 or greater.")
+
+        if warmup < 0:
+            raise ValueError("`warmup` must be 0 or greater.")
+            
+        if num_samples < 0:
+            raise ValueError("`num_samples` must be 0 or greater.")
+        
+        total_samples = warmup + num_samples * thin_by
+
+        # Split chains into two groups
+        group1_size = self.total_chains // 2
+        group2_size = self.total_chains - group1_size
+
+        print(f"Using {self.total_chains} total chains: Group 1 ({group1_size}), Group 2 ({group2_size})")
+        
+        # Keys for RNG
+        keys_per_iter = 2
+        total_rng_calls = total_samples * keys_per_iter
+        keys = jax.random.split(key, total_rng_calls).reshape(total_samples, keys_per_iter, 2)
+        
+        # Initialize diagnostics
+        diagnostics = {
+            'acceptance_rate': 0.0,
+        }
+        
+        # Initialize ensemble
+        group1 = initial_state[:group1_size]
+        group2 = initial_state[group1_size:]
+        
+        def body(carry, keys):
+            group1, group2, diagnostics = carry
+
+            group1, accept1 = self.move(group1, group2, keys[0], self.log_prob, **kwargs)
+            group2, accept2 = self.move(group2, group1, keys[1], self.log_prob, **kwargs)
+
+            #### Logging diagnostics
+            all_accepts = jnp.concatenate([accept1, accept2])
+            current_accept_rate = jnp.mean(all_accepts)
+            diagnostics['acceptance_rate'] += current_accept_rate
+            
+            #### Construct return state
+            final_states = jnp.concatenate([group1, group2])
+
+
+            return (group1, group2, diagnostics), final_states
+                
+        carry, samples = jax.lax.scan(body, init=(group1, group2, diagnostics), xs=keys)
+        _, _, diagnostics = carry
+
+        # Return post-warmup samples
+        post_warmup_samples = samples[warmup:] if warmup > 0 else samples
+
+        # Thinning
+        if thin_by > 1:
+            post_warmup_samples = post_warmup_samples[::thin_by]
+
+        return post_warmup_samples, diagnostics
+            
