@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from typing import Callable, Optional, Tuple
 
-def hmc_walk(
+def hmc_walk_move(
     group1: jnp.ndarray, group2: jnp.ndarray,
     da_state, 
     key: jax.random.PRNGKey,
