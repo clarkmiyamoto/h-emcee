@@ -1,15 +1,20 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "h-emcee"
-version = "0.0.0"
-description = "Affine invariant Hamiltonian samplers in JAX"
-authors = [{name = "Clark Miyamoto"}]
+name = "hemcee"
+version = "0.1.0"
+description = "Affine invariant hamiltonian samplers"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = ["jax", "jaxlib"]
+license = {file = "LICENSE"}
+authors = [
+    { name="Your Name", email="you@example.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "jax",
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.urls]
+Homepage = "https://github.com/clarkmiyamoto/hemcee"
