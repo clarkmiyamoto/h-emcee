@@ -7,6 +7,16 @@ def walk_move(
     key: jax.random.PRNGKey,
     potential_func_vmap: Callable,
     **kwargs):
+    '''
+    Walk Move sampler implementation using JAX.
+    Algorithm (4) in https://arxiv.org/pdf/2505.02987.
+
+    Args:
+        group1: Shape (n_chains_per_group, dim)
+        group2: Shape (n_chains_per_group, dim)
+        key: JAX random key
+        potential_func_vmap: Potential function vectorized
+    '''
     key_noise, key_accept = jax.random.split(key, 2)
     num_chains_per_group = int(group1.shape[0])
 
@@ -16,8 +26,5 @@ def walk_move(
     group1_proposed = group1 + jnp.sum(centered * xi[:, None], axis=0) / jnp.sqrt(num_chains_per_group)
 
     log_accept_prob = potential_func_vmap(group1) - potential_func_vmap(group1_proposed)
-    log_u = jnp.log(jax.random.uniform(key_accept, shape=(num_chains_per_group,), minval=1e-10, maxval=1.0))
-    accept_mask = log_u < log_accept_prob
-    updated_group1_states = jnp.where(accept_mask[:, None], group1_proposed, group1)
-
-    return updated_group1_states, accept_mask
+    
+    return group1_proposed, log_accept_prob

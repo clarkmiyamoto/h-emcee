@@ -6,7 +6,7 @@ def stretch_move(
     group1: jnp.ndarray, group2: jnp.ndarray,
     key: jax.random.PRNGKey,
     log_prob_vmap: Callable,
-    a: float = 2.0):
+    stretch: float = 2.0):
     '''
     Stretch Move sampler implementation using JAX.
     Algorithm (1) in https://arxiv.org/pdf/2505.02987.
@@ -16,7 +16,7 @@ def stretch_move(
         group2: Shape (n_chains_per_group, dim)
         key: JAX random key
         log_prob_vmap: Log probability function vectorized
-        a: Stretch parameter, must be >= 1. Default to 2.
+        stretch: Stretch parameter, must be >= 1. Default to 2.
     '''
     n_chains_per_group = int(group1.shape[0])
     dim = int(group1.shape[1])
@@ -34,15 +34,12 @@ def stretch_move(
     
     random_indices = choices[:, 0]
 
-    z = sample_inv_sqrt_density(key_stretch, a=a, shape=(n_chains_per_group,))
+    z = sample_inv_sqrt_density(key_stretch, a=stretch, shape=(n_chains_per_group,))
     group1_proposed = group2[random_indices] + z[:, None] * (group1 - group2[random_indices])
 
     log_accept_prob = (dim - 1) * jnp.log(z) + log_prob_vmap(group1) - log_prob_vmap(group1_proposed)
-    log_u = jnp.log(jax.random.uniform(key_accept, shape=(n_chains_per_group,), minval=1e-10, maxval=1.0))
-    accept_mask = log_u < log_accept_prob
-    updated_group1_states = jnp.where(accept_mask[:, None], group1_proposed, group1)
 
-    return updated_group1_states, accept_mask
+    return group1_proposed, log_accept_prob
 
 def sample_inv_sqrt_density(key: jax.random.PRNGKey, a: float, shape=()):
     """

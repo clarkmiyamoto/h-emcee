@@ -4,9 +4,10 @@ from typing import Callable, Optional, Sequence, Tuple
 import jax
 import jax.numpy as jnp
 
-from hemcee.dual_averaging import DAState, da_cond_update
 from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
 from hemcee.moves.vanilla.walk import walk_move
+from hemcee.dual_averaging import DAState, da_cond_update
+from hemcee.proposal import accept_proposal
 
 
 class HamiltonianEnsembleSampler:
@@ -138,19 +139,21 @@ class HamiltonianEnsembleSampler:
 
             #### Group 1 / Group 2 Update
             # Update group 1 using group 2 as complement
-            group1, accept1 = self.move(group1, group2, 
+            group1_proposed, log_prob_group1 = self.move(group1, group2, 
                 da_state, keys[0],
                 self.log_prob, self.grad_log_prob, 
                 self.L
             )
-            
             # Update group 2 using group 1 as complement  
-            group2, accept2 = self.move(group2, group1, 
+            group2_proposed, log_prob_group2 = self.move(group2, group1, 
                 da_state, keys[1],
                 self.log_prob, self.grad_log_prob, 
                 self.L
             )
-            
+            #### Accept proposal?
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
+            group2, accept2 = accept_proposal(group2, group2_proposed, log_prob_group2, keys[1])
+
             #### Combine diagnostics
             all_accepts = jnp.concatenate([accept1, accept2])
             current_accept_rate = jnp.mean(all_accepts)
@@ -265,8 +268,13 @@ class EnsembleSampler:
         def body(carry, keys):
             group1, group2, diagnostics = carry
 
-            group1, accept1 = self.move(group1, group2, keys[0], self.log_prob, **kwargs)
-            group2, accept2 = self.move(group2, group1, keys[1], self.log_prob, **kwargs)
+            # Construt Proposal
+            group1_proposed, log_prob_group1 = self.move(group1, group2, keys[0], self.log_prob, **kwargs)
+            group2_proposed, log_prob_group2 = self.move(group2, group1, keys[1], self.log_prob, **kwargs)
+
+            # Accept proposal?
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
+            group2, accept2 = accept_proposal(group2, group2_proposed, log_prob_group2, keys[1])
 
             #### Logging diagnostics
             all_accepts = jnp.concatenate([accept1, accept2])

@@ -60,14 +60,9 @@ def hmc_side_move(
 
     dH1 = (proposed_U1 + proposed_K1) - (current_U1 + current_K1) # Shape (n_chains_per_group,)
     log_accept_prob1 = jnp.minimum(0.0, -dH1)
-
-    log_u1 = jnp.log(jax.random.uniform(key_accept, shape=(n_chains_per_group,), minval=1e-10, maxval=1.0))
-    accepts = log_u1 < log_accept_prob1 # Shape (n_chains_per_group,)
-
-    updated_group1_states = jnp.where(accepts[:, None], group1_proposed, group1)
         
     # Track acceptance for first chains
-    return updated_group1_states, accepts
+    return group1_proposed, log_accept_prob1
 
 
 def leapfrog_side_move(q1, 

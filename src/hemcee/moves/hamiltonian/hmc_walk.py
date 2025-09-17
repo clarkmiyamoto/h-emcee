@@ -45,22 +45,9 @@ def hmc_walk_move(
     proposed_K = 0.5 * jnp.sum(momentum_proposed**2, axis=1)
 
     dH = (proposed_U + proposed_K) - (current_U + current_K)
-
     log_accept_prob1 = jnp.minimum(0.0, -dH)
 
-    log_u1 = jnp.log(
-        jax.random.uniform(
-            key_accept, shape=(n_chains_per_group,), minval=1e-10, maxval=1.0
-        )
-    ) # shape (n_chains_per_group,)
-    
-    accepts = log_u1 < log_accept_prob1
-
-    # Log Changes
-    accepts = accepts.astype(int)
-    group1 = jnp.where(accepts[:, None], group1_proposed, group1) # shape (n_chains_per_group, dim)
-
-    return group1, accepts
+    return group1_proposed, log_accept_prob1
 
 def leapfrog_walk_move(q: jnp.ndarray, 
                        p: jnp.ndarray, 

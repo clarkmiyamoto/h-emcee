@@ -42,8 +42,5 @@ def side_move(
     group1_proposed = group1 + stretch * z * (xj - xk)
 
     log_accept_prob = log_prob_vmap(group1) - log_prob_vmap(group1_proposed)
-    log_u = jnp.log(jax.random.uniform(key_accept, shape=(n_chains_per_group,), minval=1e-10, maxval=1.0))
-    accept_mask = log_u < log_accept_prob
-    updated_group1_states = jnp.where(accept_mask[:, None], group1_proposed, group1)
-
-    return updated_group1_states, accept_mask
+    
+    return group1_proposed, log_accept_prob
