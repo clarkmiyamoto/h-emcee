@@ -1,3 +1,5 @@
+"""High-level sampler implementations for hemcee."""
+
 from __future__ import annotations
 
 from typing import Callable, Optional, Sequence, Tuple
@@ -43,6 +45,30 @@ class HamiltonianEnsembleSampler:
         gamma: float = 0.05,
         kappa: float = 0.75,
     ) -> None:
+        """Initialise the sampler configuration.
+
+        Args:
+            total_chains (int): Total number of chains in the ensemble.
+            dim (int): Dimensionality of the target distribution.
+            log_prob (Callable): Callable returning the log density of the
+                target distribution.
+            grad_log_prob (Callable, optional): Callable returning the gradient
+                of ``log_prob``. Defaults to ``None`` to compute gradients via
+                ``jax.grad``.
+            step_size (float): Leapfrog step size. Defaults to ``0.2``.
+            L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
+            move (Callable): Proposal function used for ensemble updates.
+            target_accept (float): Target acceptance rate used by dual
+                averaging. Defaults to ``0.8``.
+            t0 (float): Dual averaging stability parameter. Defaults to
+                ``10.0``.
+            mu (float): Dual averaging log step-size offset. Defaults to
+                ``0.05``.
+            gamma (float): Dual averaging shrinkage parameter. Defaults to
+                ``0.05``.
+            kappa (float): Dual averaging adaptation rate. Defaults to
+                ``0.75``.
+        """
         self.total_chains = int(total_chains)
         if self.total_chains < 4:
             raise ValueError("`self.total_chains` must be at least 4 to form meaningful ensemble groups")
@@ -98,7 +124,6 @@ class HamiltonianEnsembleSampler:
             tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
             containing acceptance rates and dual averaging state.
         """
-
         if show_progress:
             raise NotImplementedError("`show_progress=True` is not supported yet")
         
@@ -224,6 +249,15 @@ class EnsembleSampler:
         log_prob: Callable,
         move = walk_move,
     ) -> None:
+        """Initialise the vanilla ensemble sampler.
+
+        Args:
+            total_chains (int): Total number of chains in the ensemble.
+            dim (int): Dimensionality of the target distribution.
+            log_prob (Callable): Callable returning the log density of the
+                target distribution.
+            move (Callable): Proposal function used for ensemble updates.
+        """
         self.total_chains = int(total_chains)
         if self.total_chains < 4:
             raise ValueError("`self.total_chains` must be at least 4 to form meaningful ensemble groups")
@@ -257,7 +291,7 @@ class EnsembleSampler:
 
         Returns:
             tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostic
-            information including acceptance rates.
+                information including acceptance rates.
         """
         if show_progress:
             raise NotImplementedError("`show_progress=True` is not supported yet")

@@ -4,25 +4,31 @@ import jax.numpy as jnp
 from typing import Callable, Optional, Tuple
 
 def hmc_walk_move(
-    group1: jnp.ndarray, group2: jnp.ndarray,
-    step_size: float, 
+    group1: jnp.ndarray,
+    group2: jnp.ndarray,
+    step_size: float,
     key: jax.random.PRNGKey,
-    potential_func_vmap: Callable, grad_potential_func_vmap: Callable,
-    L: int):
-    '''
-    Hamiltonian Walk Move (HWM) sampler implementation using JAX.
-    Algorithm (3) in https://arxiv.org/pdf/2505.02987.
+    potential_func_vmap: Callable,
+    grad_potential_func_vmap: Callable,
+    L: int,
+):
+    """Propose a Hamiltonian walk move.
+
+    Implements Algorithm (3) from https://arxiv.org/pdf/2505.02987.
 
     Args:
-        group1: Proposal group. Shape (n_chains_per_group, dim)
-        group2: Complement group. Shape (n_chains_per_group, dim)
-        step_size: Step size
-        key: JAX random key
-        n_chains_per_group: Number of chains per group (total chains = 2 * n_chains_per_group).
-        potential_func_vmap: Potential function vectorized
-        grad_potential_func_vmap: Gradient of potential function vectorized
-        L: Number of leapfrog steps
-    '''
+        group1 (jnp.ndarray): Proposal group with shape ``(n_chains_per_group, dim)``.
+        group2 (jnp.ndarray): Complementary group with shape ``(n_chains_per_group, dim)``.
+        step_size (float): Leapfrog step size.
+        key (jax.random.PRNGKey): Random number generator key.
+        potential_func_vmap (Callable): Vectorised potential energy function.
+        grad_potential_func_vmap (Callable): Vectorised gradient of the potential function.
+        L (int): Number of leapfrog steps.
+
+    Returns:
+        Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
+        probabilities for each chain.
+    """
     n_chains_per_group = int(group1.shape[0])
 
     key_momentum, key_accept = jax.random.split(key, 2)
@@ -49,21 +55,30 @@ def hmc_walk_move(
 
     return group1_proposed, log_accept_prob1
 
-def leapfrog_walk_move(q: jnp.ndarray, 
-                       p: jnp.ndarray, 
-                       grad_fn: Callable, 
-                       beta_eps: float, 
-                       L: int,
-                       centered: jnp.ndarray):
-    '''
+def leapfrog_walk_move(
+    q: jnp.ndarray,
+    p: jnp.ndarray,
+    grad_fn: Callable,
+    beta_eps: float,
+    L: int,
+    centered: jnp.ndarray,
+):
+    """Perform leapfrog integration for the Hamiltonian walk move.
+
     Args:
-        q: Shape (n_chains_per_group, dim)
-        p: Shape (n_chinas_per_group, n_chains_per_group)
-        grad_fn: Gradient of log probabiltiy vectorized. Maps (batch_size, dim) -> (batch_size, dim)
-        beta_eps: beta times step size (step_size)
-        L: Number of steps
-        centered: Shape (n_chains_per_group, dim)
-    '''
+        q (jnp.ndarray): Positions of the first group of chains with shape
+            ``(n_chains_per_group, dim)``.
+        p (jnp.ndarray): Momenta matrix with shape ``(n_chains_per_group, n_chains_per_group)``.
+        grad_fn (Callable): Vectorised gradient of the log probability mapping
+            ``(batch_size, dim)`` to ``(batch_size, dim)``.
+        beta_eps (float): Step size scaled by ``beta``.
+        L (int): Number of leapfrog steps.
+        centered (jnp.ndarray): Centred complementary group with shape
+            ``(n_chains_per_group, dim)``.
+
+    Returns:
+        Tuple[jnp.ndarray, jnp.ndarray]: Updated positions and momenta.
+    """
     grad = grad_fn(q) # Shape (n_chains_per_group, dim)
     grad = jnp.nan_to_num(grad, nan=0.0) 
 

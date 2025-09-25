@@ -99,7 +99,6 @@ def hamiltonian_side_move(potential_func: Callable,
         Metropolis-Hastings correction. The implementation is fully
         vectorized.
     """
-
     ### ERROR CHECKING
     if (n_chains_per_group <= 1):
         raise ValueError("n_chains_per_group must be greater than 1")

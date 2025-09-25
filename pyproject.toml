@@ -43,9 +43,14 @@ max-line-length = 100
 extend-ignore = ["E203", "W503"]        # common Black/pep8 interop
 select = ["E", "F", "W", "D"]           # include docstring rules (D- codes)
 ignore = [
+  "D100",  # missing docstring in public module
+  "D101",  # missing docstring in public class
+  "D102",  # missing docstring in public method
+  "D103",  # missing docstring in public function
   "D104",  # missing docstring in package
   "D105",  # missing docstring in magic method
   "D107",  # missing docstring in __init__
+  "D106",  # missing docstring in public nested class
 ]
 per-file-ignores = [
   "tests/*:D100,D101,D102,D103,D104,D105,D106,D107",

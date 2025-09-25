@@ -3,21 +3,27 @@ import jax.numpy as jnp
 from typing import Callable
 
 def side_move(
-    group1: jnp.ndarray, group2: jnp.ndarray,
+    group1: jnp.ndarray,
+    group2: jnp.ndarray,
     key: jax.random.PRNGKey,
     log_prob_vmap: Callable,
-    stretch: float = 2.0):
-    '''
-    Side Move sampler implementation using JAX.
-    Algorithm (2) in https://arxiv.org/pdf/2505.02987.
+    stretch: float = 2.0,
+):
+    """Propose a side move using the affine-invariant sampler.
+
+    Implements Algorithm (2) from https://arxiv.org/pdf/2505.02987.
 
     Args:
-        group1: Shape (n_chains_per_group, dim)
-        group2: Shape (n_chains_per_group, dim)
-        key: JAX random key
-        log_prob_vmap: Log probability function vectorized
-        stretch: Stretch parameter, must be >= 1. Default to 2.
-    '''
+        group1 (jnp.ndarray): Proposal group with shape ``(n_chains_per_group, dim)``.
+        group2 (jnp.ndarray): Complementary group with shape ``(n_chains_per_group, dim)``.
+        key (jax.random.PRNGKey): Random number generator key.
+        log_prob_vmap (Callable): Vectorised log-probability function.
+        stretch (float): Stretch parameter; must be greater than or equal to ``1``.
+
+    Returns:
+        Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
+        probabilities for each chain.
+    """
     n_chains_per_group = int(group1.shape[0])
 
     keys = jax.random.split(key, n_chains_per_group + 2)
