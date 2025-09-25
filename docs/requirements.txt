@@ -1,5 +1,5 @@
 sphinx
-sphinxawesome-theme
+furo
 matplotlib
 ipython
 nbsphinx
