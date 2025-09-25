@@ -5,7 +5,7 @@ from typing import Callable, Optional, Tuple
 
 def hmc_walk_move(
     group1: jnp.ndarray, group2: jnp.ndarray,
-    da_state, 
+    step_size: float, 
     key: jax.random.PRNGKey,
     potential_func_vmap: Callable, grad_potential_func_vmap: Callable,
     L: int):
@@ -16,7 +16,7 @@ def hmc_walk_move(
     Args:
         group1: Proposal group. Shape (n_chains_per_group, dim)
         group2: Complement group. Shape (n_chains_per_group, dim)
-        da_state: Dual Averaging State
+        step_size: Step size
         key: JAX random key
         n_chains_per_group: Number of chains per group (total chains = 2 * n_chains_per_group).
         potential_func_vmap: Potential function vectorized
@@ -34,7 +34,7 @@ def hmc_walk_move(
         group1, 
         momentum, 
         grad_potential_func_vmap, 
-        da_state.step_size, 
+        step_size, 
         L, 
         centered2
     )

@@ -4,7 +4,7 @@ from typing import Callable
 
 def hmc_side_move(
     group1: jnp.ndarray, group2: jnp.ndarray,
-    da_state, 
+    step_size: float, 
     key: jax.random.PRNGKey,
     potential_func_vmap: Callable, grad_potential_func_vmap: Callable,
     L: int):
@@ -15,7 +15,7 @@ def hmc_side_move(
     Args:
         group1: Shape (n_chains_per_group, dim)
         group2: Shape (n_chains_per_group, dim)
-        da_state: Dual Averaging State
+        step_size: Step size
         key: JAX random key
         potential_func_vmap: Potential function vectorized
         grad_potential_func_vmap: Gradient of potential function vectorized
@@ -38,7 +38,7 @@ def hmc_side_move(
     random_indices1_from_group2 = choices[:, 0]
     random_indices2_from_group2 = choices[:, 1]
 
-    diff_particles_group2 = (group2[random_indices1_from_group2] - group2[random_indices2_from_group2]) / jnp.sqrt(2*n_chains_per_group)
+    diff_particles_group2 = (group2[random_indices1_from_group2] - group2[random_indices2_from_group2]) / jnp.sqrt(2*n_chains_per_group) # Shape (n_chains_per_group, dim)
 
     momentum = jax.random.normal(key_momentum, shape=(n_chains_per_group,))
 
@@ -46,9 +46,8 @@ def hmc_side_move(
             group1, 
             momentum, 
             grad_potential_func_vmap, 
-            da_state.step_size, 
+            step_size, 
             L, 
-            n_chains_per_group,
             diff_particles_group2
     )
 
@@ -70,16 +69,15 @@ def leapfrog_side_move(q1,
                        grad_fn, 
                        beta_eps, 
                        L,
-                       n_chains_per_group,
                        diff_particles_group2):
     '''
     Args
         - q1: position of first group of chains. Shape (n_chains_per_group, dim)
         - p1: momentum of first group of chains. Shape (n_chains_per_group,)
         - grad_fn: gradient of the potential function. Function of shape (n_chains, dim) -> (n_chains, dim)
-        - beta_eps: half of the step size. Scalar
-        - L: number of leapfrog steps. Scalar
-        - L: number of leapfrog steps
+        - beta_eps: half of the step size.
+        - L: number of leapfrog steps.
+        - diff_particles_group2: difference between particles in group 2. Shape (n_chains_per_group, dim)
     
     Returns
         - q1: position of first group of chains. Shape (n_chains_per_group, dim)

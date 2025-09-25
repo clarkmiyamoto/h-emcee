@@ -137,16 +137,18 @@ class HamiltonianEnsembleSampler:
             group1, group2, da_state, diagnostics = carry
             keys, iteration = keys_and_iter
 
+            step_size = da_state.step_size
+
             #### Group 1 / Group 2 Update
             # Update group 1 using group 2 as complement
             group1_proposed, log_prob_group1 = self.move(group1, group2, 
-                da_state, keys[0],
+                step_size, keys[0],
                 self.log_prob, self.grad_log_prob, 
                 self.L
             )
             # Update group 2 using group 1 as complement  
             group2_proposed, log_prob_group2 = self.move(group2, group1, 
-                da_state, keys[1],
+                step_size, keys[1],
                 self.log_prob, self.grad_log_prob, 
                 self.L
             )
