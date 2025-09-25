@@ -1,2 +1,5 @@
 sphinx
 sphinxawesome-theme
+matplotlib
+ipython
+nbsphinx

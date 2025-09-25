@@ -7,9 +7,10 @@ name = "hemcee"
 version = "0.1.0"
 description = "Affine invariant hamiltonian samplers"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = { file = "LICENSE" }
 authors = [
-    { name="Your Name", email="you@example.com" }
+    { name = "Clark Miyamoto" },
+    { name = "Yifan Chen" }
 ]
 requires-python = ">=3.9"
 dependencies = [
@@ -18,3 +19,59 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/clarkmiyamoto/hemcee"
+
+# --- Dev extras (install with: pip install -e .[dev]) ---
+[project.optional-dependencies]
+dev = [
+    # testing
+    "pytest>=7",
+    "pytest-cov",
+
+    # linting & docstrings
+    "flake8>=7",
+    "flake8-docstrings",
+    "pydocstyle>=6",
+    "darglint",
+
+    # formatting (optional but nice)
+    "black>=24.0",
+]
+
+# --- Lint config ---
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]        # common Black/pep8 interop
+select = ["E", "F", "W", "D"]           # include docstring rules (D- codes)
+ignore = [
+  "D104",  # missing docstring in package
+  "D105",  # missing docstring in magic method
+  "D107",  # missing docstring in __init__
+]
+per-file-ignores = [
+  "tests/*:D100,D101,D102,D103,D104,D105,D106,D107",
+]
+
+# darglint = strict check that docstrings match signatures in Google style
+[tool.darglint]
+docstring_style = "google"
+strictness = "short"
+# ignore_regex = "(tests/)"
+
+# --- Pytest config (optional; handy in CI and locally) ---
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-q"
+testpaths = ["tests"]
+
+# --- Coverage config (optional; used by pytest-cov) ---
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+# Keep this if you use combined coverage paths (e.g., site-packages mirrors)
+[tool.coverage.paths]
+source = ["src", "*/site-packages"]

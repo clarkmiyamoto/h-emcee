@@ -1,0 +1,16 @@
+/* Increase space between paragraphs */
+p {
+    margin-bottom: 1.5em;  /* default is ~1em */
+    line-height: 1.6;      /* optional: improves readability */
+  }
+  
+  /* Optional: control spacing after list items too */
+  li {
+    margin-bottom: 0.5em;
+  }
+  
+/* Reduce spacing between toctree list items */
+.toctree-wrapper ul li {
+  margin: 0.01em 0;   /* less vertical gap */
+  padding: 0;         /* remove extra padding */
+}

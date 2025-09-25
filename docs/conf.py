@@ -6,23 +6,29 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'hemcee'
-copyright = '2025, Clark Miyamoto'
+project = 'h-emcee'
+copyright = '2025, Clark Miyamoto & contributors'
 author = 'Clark Miyamoto'
-release = '1.0'
+__version__ = '1.0'
+release = __version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = []
+extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.mathjax',
+    'nbsphinx',
+]
 
-templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
-
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = 'sphinxawesome_theme'
-html_static_path = ['_static']
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
+
+html_title = "h-emcee"
