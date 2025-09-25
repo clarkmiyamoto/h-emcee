@@ -11,8 +11,21 @@ from hemcee.proposal import accept_proposal
 
 
 class HamiltonianEnsembleSampler:
-    """
-    Hamiltonian Ensemble samplers. 
+    """Hamiltonian ensemble sampler with optional dual averaging.
+
+    Attributes:
+        total_chains (int): Total number of ensemble chains.
+        dim (int): Dimensionality of the target distribution.
+        log_prob (Callable): Vectorized log-probability function.
+        grad_log_prob (Callable): Vectorized gradient of the log probability.
+        step_size (float): Leapfrog step size.
+        L (int): Number of leapfrog steps per move.
+        move (Callable): Proposal function updating each ensemble group.
+        target_accept (float): Target acceptance probability for dual averaging.
+        t0 (float): Dual averaging stabilizer parameter.
+        mu (float): Dual averaging log step size offset.
+        gamma (float): Dual averaging shrinkage parameter.
+        kappa (float): Dual averaging adaptation rate.
     """
 
     def __init__(
@@ -54,9 +67,9 @@ class HamiltonianEnsembleSampler:
         self.gamma = gamma
         self.kappa = kappa
 
-    def run_mcmc(self, 
+    def run_mcmc(self,
                key: jax.random.PRNGKey,
-               initial_state: jnp.ndarray, 
+               initial_state: jnp.ndarray,
                num_samples: int,
                warmup: int = 1000,
                thin_by=1,
@@ -64,19 +77,26 @@ class HamiltonianEnsembleSampler:
                adapt_integration: bool = False,
                show_progress: bool = False,
                ) -> Tuple[jnp.ndarray, dict]:
-        """
-        Run Ensemble NUTS sampling.
-        
+        """Run the Hamiltonian ensemble sampler.
+
         Args:
-            key: JAX random key for reproducibility. Default: jax.random.PRNGKey(0)
-            initial_state: Initial state
-            num_samples: Number of post-warmup samples
-            warmup: Number of warmup samples.
-            thin_by: Drops every `thin_by` number of samples. Default: 1 (no thinning).
-            adapt_step_size: Whether to adapt step size using dual averaging
-            adapt_integration: Whether to adapt integration using affine invariant NUTs
-            show_progress: Whether to show progress bar. 
-                NOTE: THIS WILL SIGNIFICANTLY DEGRADE PERFORMANCE!
+            key (jax.random.PRNGKey): Random number generator key.
+            initial_state (jnp.ndarray): Initial ensemble state with shape
+                ``(total_chains, dim)``.
+            num_samples (int): Number of post-warmup samples to retain.
+            warmup (int): Number of warmup iterations. Defaults to ``1000``.
+            thin_by (int): Keep every ``thin_by``
+                sample. Defaults to ``1`` (no thinning).
+            adapt_step_size (bool): Whether to adapt the step size via dual
+                averaging. Defaults to ``True``.
+            adapt_integration (bool): Whether to adapt integration settings
+                using affine-invariant NUTS. Defaults to ``False``.
+            show_progress (bool): Whether to display a progress bar. Defaults
+                to ``False``.
+
+        Returns:
+            tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
+            containing acceptance rates and dual averaging state.
         """
 
         if show_progress:
@@ -195,6 +215,7 @@ class HamiltonianEnsembleSampler:
         return post_warmup_samples, diagnostics
 
 class EnsembleSampler:
+    """Affine-invariant ensemble sampler wrapper."""
 
     def __init__(
         self,
@@ -212,27 +233,32 @@ class EnsembleSampler:
         self.log_prob = jax.jit(jax.vmap(log_prob))
         self.move = move
 
-    def run_mcmc(self, 
+    def run_mcmc(self,
                key: jax.random.PRNGKey,
-               initial_state: jnp.ndarray, 
+               initial_state: jnp.ndarray,
                num_samples: int,
                warmup: int = 1000,
                thin_by=1,
                show_progress: bool = False,
                **kwargs
                ) -> Tuple[jnp.ndarray, dict]:
-        '''
-        Args
-        
+        """Run the vanilla ensemble sampler.
+
         Args:
-            key: JAX random key for reproducibility. Default: jax.random.PRNGKey(0)
-            initial_state: Initial state
-            num_samples: Number of post-warmup samples
-            warmup: Number of warmup samples.
-            thin_by: Drops every `thin_by` number of samples. Default: 1 (no thinning).
-            show_progress: Whether to show progress bar. 
-                NOTE: THIS WILL SIGNIFICANTLY DEGRADE PERFORMANCE!
-        '''
+            key (jax.random.PRNGKey): Random number generator key.
+            initial_state (jnp.ndarray): Initial ensemble state with shape
+                ``(total_chains, dim)``.
+            num_samples (int): Number of post-warmup samples to retain.
+            warmup (int): Number of warmup iterations. Defaults to ``1000``.
+            thin_by (int): Keep every ``thin_by`` sample. Defaults to ``1``.
+            show_progress (bool): Whether to display a progress bar. Defaults
+                to ``False``.
+            **kwargs: Additional keyword arguments passed to the proposal move.
+
+        Returns:
+            tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostic
+            information including acceptance rates.
+        """
         if show_progress:
             raise NotImplementedError("`show_progress=True` is not supported yet")
         

@@ -7,15 +7,29 @@ import time
 from tqdm import tqdm
 
 class AffineInvariantEnsembleNUTSSampler:
+    """Affine invariant ensemble No-U-Turn sampler.
+
+    Attributes:
+        log_prob_fn (Callable[[jnp.ndarray], jnp.ndarray]): Vectorized log
+            probability function.
+        grad_log_prob_fn (Callable[[jnp.ndarray], jnp.ndarray]): Vectorized
+            gradient of the log probability function.
+        dim (int): Dimensionality of the parameter space.
+        step_size (float): Current leapfrog step size shared by all chains.
+        max_treedepth (int): Maximum depth allowed when building the NUTS tree.
+        target_accept (float): Target acceptance rate used for dual averaging.
+        gamma (float): Dual averaging shrinkage parameter.
+        t0 (float): Dual averaging stability parameter.
+        kappa (float): Dual averaging adaptation rate parameter.
+        beta (float): Strength of the ensemble interaction term.
+        mu (float): Log step size offset used in dual averaging updates.
+        log_epsilon_bar (float): Dual averaging running average of log step
+            sizes.
+        H_bar (float): Dual averaging state capturing acceptance rate
+            deviations.
     """
-    Affine Invariant Ensemble No-U-Turn Sampler (AIE-NUTS) implementation.
     
-    Uses two groups of chains, where groups interact through 
-    ensemble-based preconditioning. Each group uses the other as a 
-    complement ensemble for momentum preconditioning.
-    """
-    
-    def __init__(self, 
+    def __init__(self,
                  log_prob_fn: Callable[[jnp.ndarray], jnp.ndarray],
                  dim: int,
                  grad_log_prob_fn: Callable[[jnp.ndarray], jnp.ndarray] = None,
@@ -26,18 +40,28 @@ class AffineInvariantEnsembleNUTSSampler:
                  t0: float = 10.0,
                  kappa: float = 0.75,
                  beta: float = 1.0):
-        """
-        Initialize Affine Invariant Ensemble NUTS sampler.
-        
+        """Initialize an affine invariant ensemble NUTS sampler.
+
         Args:
-            log_prob_fn: Log probability function (dim,) -> ()
-            dim: Problem dimension
-            grad_log_prob_fn: Gradient function (dim,) -> (dim,). If None, uses JAX Autodiff.
-            step_size: Initial step size
-            max_treedepth: Maximum tree depth
-            target_accept: Target acceptance probability for dual averaging
-            gamma, t0, kappa: Dual averaging parameters
-            beta: Ensemble interaction strength
+            log_prob_fn (Callable[[jnp.ndarray], jnp.ndarray]): Log-probability
+                function that maps ``(dim,)`` inputs to scalars and is
+                vectorized with ``jax.vmap``.
+            dim (int): Dimensionality of the target distribution.
+            grad_log_prob_fn (Callable[[jnp.ndarray], jnp.ndarray], optional):
+                Gradient of ``log_prob_fn``. When ``None`` the gradient is
+                computed with automatic differentiation. Defaults to ``None``.
+            step_size (float): Initial leapfrog step size. Defaults to ``0.1``.
+            max_treedepth (int): Maximum binary tree depth for NUTS. Defaults
+                to ``10``.
+            target_accept (float): Target acceptance rate for dual averaging.
+                Defaults to ``0.8``.
+            gamma (float): Dual averaging shrinkage parameter. Defaults to
+                ``0.05``.
+            t0 (float): Dual averaging stabilization parameter. Defaults to
+                ``10.0``.
+            kappa (float): Dual averaging adaptation rate. Defaults to
+                ``0.75``.
+            beta (float): Ensemble interaction strength. Defaults to ``1.0``.
         """
         self.log_prob_fn = jax.jit(jax.vmap(log_prob_fn)) # (batch_size, dim,) -> (batch_size,)
         if grad_log_prob_fn is None: # Defaults to JAX Autodiff
@@ -59,7 +83,14 @@ class AffineInvariantEnsembleNUTSSampler:
         self.H_bar = 0.0
     
     def update_step_size(self, accept_prob: float, iteration: int, warmup_length: int):
-        """Update step size using dual averaging."""
+        """Update the leapfrog step size using dual averaging.
+
+        Args:
+            accept_prob (float): Mean acceptance probability for the current
+                iteration.
+            iteration (int): Zero-indexed iteration counter.
+            warmup_length (int): Total number of warmup iterations.
+        """
         if iteration < warmup_length:
             self.H_bar = ((1.0 - 1.0/(iteration + 1 + self.t0)) * self.H_bar + 
                          (self.target_accept - accept_prob) / (iteration + 1 + self.t0))
@@ -75,7 +106,16 @@ class AffineInvariantEnsembleNUTSSampler:
         
     
     def compute_covariance_inv(self, complement_ensemble: jnp.ndarray) -> jnp.ndarray:
-        """Compute inverse empirical covariance of complement ensemble."""
+        """Compute the inverse empirical covariance of the complement ensemble.
+
+        Args:
+            complement_ensemble (jnp.ndarray): Complement group positions with
+                shape ``(n_complement, dim)``.
+
+        Returns:
+            jnp.ndarray: Regularized inverse covariance matrix with shape
+                ``(dim, dim)``.
+        """
         n_complement = complement_ensemble.shape[0]
         
         # Center the complement ensemble
@@ -92,18 +132,25 @@ class AffineInvariantEnsembleNUTSSampler:
         except jnp.linalg.LinAlgError:
             return jnp.linalg.pinv(emp_cov + reg)
     
-    def ensemble_leapfrog(self, theta: jnp.ndarray, r: jnp.ndarray, 
-                         epsilon: float, complement_ensemble: jnp.ndarray, 
+    def ensemble_leapfrog(self, theta: jnp.ndarray, r: jnp.ndarray,
+                         epsilon: float, complement_ensemble: jnp.ndarray,
                          direction: int = 1) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        """
-        Ensemble leapfrog step.
-        
+        """Perform an ensemble-coupled leapfrog step.
+
         Args:
-            theta: Positions (n_chains_group, dim)
-            r: Momenta (n_chains_group, n_complement) - ensemble momentum!
-            epsilon: Step size
-            complement_ensemble: Complement group positions (n_complement, dim)
-            direction: +1 for forward, -1 for backward
+            theta (jnp.ndarray): Current positions with shape
+                ``(n_chains_group, dim)``.
+            r (jnp.ndarray): Ensemble momenta with shape
+                ``(n_chains_group, n_complement)``.
+            epsilon (float): Step size for the leapfrog integrator.
+            complement_ensemble (jnp.ndarray): Complement group positions with
+                shape ``(n_complement, dim)``.
+            direction (int): ``+1`` for a forward step and ``-1`` for a
+                backward step. Defaults to ``1``.
+
+        Returns:
+            tuple[jnp.ndarray, jnp.ndarray]: Updated positions and momenta with
+                the same shapes as ``theta`` and ``r``.
         """
         n_complement = complement_ensemble.shape[0]
         
@@ -138,10 +185,21 @@ class AffineInvariantEnsembleNUTSSampler:
                                r_plus: jnp.ndarray, r_minus: jnp.ndarray,
                                complement_ensemble: jnp.ndarray,
                                cov_inv: jnp.ndarray) -> jnp.ndarray:
-        """
-        Compute U-turn criterion using ensemble-weighted metric.
-        
-        Returns boolean array: True means continue, False means stop.
+        """Evaluate the NUTS U-turn criterion under the ensemble metric.
+
+        Args:
+            theta_plus (jnp.ndarray): Forward tree endpoint positions.
+            theta_minus (jnp.ndarray): Backward tree endpoint positions.
+            r_plus (jnp.ndarray): Forward tree momenta.
+            r_minus (jnp.ndarray): Backward tree momenta.
+            complement_ensemble (jnp.ndarray): Complement ensemble positions
+                with shape ``(n_complement, dim)``.
+            cov_inv (jnp.ndarray): Inverse covariance matrix from the
+                complement ensemble with shape ``(dim, dim)``.
+
+        Returns:
+            jnp.ndarray: Boolean mask indicating whether to continue
+                expanding the tree for each chain.
         """
         n_complement = complement_ensemble.shape[0]
         delta_theta = theta_plus - theta_minus
@@ -163,11 +221,24 @@ class AffineInvariantEnsembleNUTSSampler:
     def build_tree(self, theta: jnp.ndarray, r: jnp.ndarray, u: jnp.ndarray,
                    direction: int, depth: int, epsilon: float,
                    complement_ensemble: jnp.ndarray, cov_inv: jnp.ndarray, key: jax.random.PRNGKey):
-        """
-        Build NUTS tree for ensemble of chains.
-        
-        Returns: theta_minus, r_minus, theta_plus, r_plus, theta_prime, 
-                n_prime, s_prime, alpha_prime
+        """Recursively build a NUTS subtree for the ensemble.
+
+        Args:
+            theta (jnp.ndarray): Initial positions for the subtree.
+            r (jnp.ndarray): Initial ensemble momenta.
+            u (jnp.ndarray): Slice variables for the NUTS criterion.
+            direction (int): Direction of tree expansion (``+1`` or ``-1``).
+            depth (int): Remaining depth to expand.
+            epsilon (float): Step size for leapfrog integration.
+            complement_ensemble (jnp.ndarray): Complement group positions.
+            cov_inv (jnp.ndarray): Inverse covariance matrix from the
+                complement ensemble.
+            key (jax.random.PRNGKey): Random number generator key.
+
+        Returns:
+            tuple: Tuple containing ``(theta_minus, r_minus, theta_plus,
+            r_plus, theta_prime, n_prime, s_prime, alpha_prime)`` where each
+            element corresponds to the standard NUTS recursion outputs.
         """
         if depth == 0:
             # Base case: single leapfrog step
@@ -243,18 +314,20 @@ class AffineInvariantEnsembleNUTSSampler:
     
     def nuts_step(self, theta: jnp.ndarray, complement_ensemble: jnp.ndarray,
                   epsilon: float, keys: jax.random.PRNGKey) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        """
-        Single NUTS step for a group of chains.
+        """Execute a single ensemble NUTS update.
 
-        '''
         Args:
-            theta: Current positions (n_chains, dim)
-            complement_ensemble: Complement ensemble positions (n_complement, dim)
-            epsilon: Step size
-            keys: JAX random keys for reproducibility. Must be 4 unique keys.
-        '''
-        
-        Returns: new_theta, acceptance_probs, tree_depths
+            theta (jnp.ndarray): Current positions for the active group with
+                shape ``(n_chains, dim)``.
+            complement_ensemble (jnp.ndarray): Complement ensemble positions
+                with shape ``(n_complement, dim)``.
+            epsilon (float): Step size for the leapfrog integrator.
+            keys (jax.random.PRNGKey): Stack of random keys used during tree
+                building.
+
+        Returns:
+            tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]: Updated positions,
+            acceptance probabilities, and tree depths for each chain.
         """
         n_chains = theta.shape[0]
         n_complement = complement_ensemble.shape[0]
@@ -352,22 +425,28 @@ class AffineInvariantEnsembleNUTSSampler:
         return theta_new, accept_probs, final_tree_depths
     
     def sample(self, theta_init: jnp.ndarray, num_samples: int,
-               total_chains: int = None, warmup: int = 1000, 
+               total_chains: int = None, warmup: int = 1000,
                adapt_step_size: bool = True,
                key: jax.random.PRNGKey = jax.random.PRNGKey(0)) -> Tuple[jnp.ndarray, dict]:
-        """
-        Run Ensemble NUTS sampling.
-        
+        """Run the ensemble NUTS sampler.
+
         Args:
-            theta_init: Initial position (will be replicated)
-            num_samples: Number of post-warmup samples
-            total_chains: Total number of chains to use (default: 2*dim, minimum: 4)
-            warmup: Number of warmup samples
-            adapt_step_size: Whether to adapt step size
-            key: JAX random key for reproducibility. Default: jax.random.PRNGKey(0)
+            theta_init (jnp.ndarray): Initial position replicated across
+                chains.
+            num_samples (int): Number of post-warmup samples to retain.
+            total_chains (int, optional): Total number of chains to simulate.
+                Defaults to ``max(4, 2 * dim)``.
+            warmup (int): Number of warmup iterations to discard. Defaults to
+                ``1000``.
+            adapt_step_size (bool): Whether to adapt the step size during
+                warmup. Defaults to ``True``.
+            key (jax.random.PRNGKey): Random number generator key. Defaults to
+                ``jax.random.PRNGKey(0)``.
+
         Returns:
-            samples: (total_samples, total_chains, dim) array
-            diagnostics: Dictionary of diagnostic information
+            tuple[jnp.ndarray, dict]: Post-warmup samples with shape
+            ``(num_samples, total_chains, dim)`` and a dictionary of
+            diagnostics.
         """
         if total_chains is None:
             total_chains = max(4, 2 * self.dim)
@@ -449,11 +528,16 @@ class AffineInvariantEnsembleNUTSSampler:
         return post_warmup_samples, diagnostics
 
 def test_ensemble_nuts():
+    """Test ensemble NUTS on a high-dimensional Gaussian target.
+
+    Returns:
+        tuple[jnp.ndarray, dict]: Samples drawn from the test problem and the
+            corresponding diagnostics.
+    """
+
     import time
     import numpy as np
     jax.config.update("jax_enable_x64", True)
-    
-    """Test Ensemble NUTS on high-dimensional Gaussian with different chain counts."""
     print("=== Testing Flexible Ensemble NUTS Sampler ===")
     
     # Problem setup
@@ -475,7 +559,15 @@ def test_ensemble_nuts():
     
     # Vectorized target functions
     def log_prob_fn(x):
-        """Vectorized negative log density (potential energy)"""        
+        """Evaluate the vectorized Gaussian log density.
+
+        Args:
+            x (jnp.ndarray): Sample locations with shape ``(dim,)`` or batched
+                along the leading dimension.
+
+        Returns:
+            jnp.ndarray: Log probability values for each sample.
+        """
         # Vectorized operation for all samples
         centered = x - true_mean
         result = - 0.5 * jnp.einsum('j,jk,k->', centered, precision, centered)

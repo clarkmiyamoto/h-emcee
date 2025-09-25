@@ -2,21 +2,30 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 
-def leapfrog_walk_move(q: jnp.ndarray, 
-                       p: jnp.ndarray, 
-                       grad_fn: Callable, 
-                       beta_eps: float, 
+def leapfrog_walk_move(q: jnp.ndarray,
+                       p: jnp.ndarray,
+                       grad_fn: Callable,
+                       beta_eps: float,
                        L: int,
                        centered: jnp.ndarray):
-    '''
+    """Perform a leapfrog step for the ensemble walk move.
+
     Args:
-        q: Shape (n_chains_per_group, dim)
-        p: Shape (n_chinas_per_group, n_chains_per_group)
-        grad_fn: Gradient of log probabiltiy vectorized. Maps (batch_size, dim) -> (batch_size, dim)
-        beta_eps: beta times step size (step_size)
-        L: Number of steps
-        centered: Shape (n_chains_per_group, dim)
-    '''
+        q (jnp.ndarray): Current positions with shape
+            ``(n_chains_per_group, dim)``.
+        p (jnp.ndarray): Current ensemble momenta with shape
+            ``(n_chains_per_group, n_chains_per_group)``.
+        grad_fn (Callable): Vectorized gradient of the log probability mapping
+            arrays of shape ``(batch_size, dim)`` to the same shape.
+        beta_eps (float): Product of the interaction strength and step size.
+        L (int): Number of leapfrog substeps to perform.
+        centered (jnp.ndarray): Centered complement ensemble with shape
+            ``(n_chains_per_group, dim)``.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and momenta with
+            the same shapes as the inputs ``q`` and ``p``.
+    """
     grad = grad_fn(q) # Shape (n_chains_per_group, dim)
     grad = jnp.nan_to_num(grad, nan=0.0) 
 
@@ -39,18 +48,42 @@ def leapfrog_walk_move(q: jnp.ndarray,
 
     return q, p
 
-def hamiltonian_walk_move(potential_func: Callable, 
-                          initial: jnp.ndarray, 
-                          n_samples: int, 
+def hamiltonian_walk_move(potential_func: Callable,
+                          initial: jnp.ndarray,
+                          n_samples: int,
                           grad_fn: Callable = None,
-                          n_chains_per_group: int = 5, 
-                          step_size: float = 0.01, 
-                          L: int = 10, 
+                          n_chains_per_group: int = 5,
+                          step_size: float = 0.01,
+                          L: int = 10,
                           beta: float = 0.05,
                           n_thin=1,
                           key=jax.random.PRNGKey(0)):
-    """
-    Hamiltonian Walk Move (HWM) sampler implementation using JAX.
+    """Run the Hamiltonian Walk Move (HWM) sampler.
+
+    Args:
+        potential_func (Callable): Potential energy (negative log-density)
+            function that accepts ``(dim,)`` arrays and returns scalars.
+        initial (jnp.ndarray): Initial state broadcast to all chains.
+        n_samples (int): Number of samples per chain to collect.
+        grad_fn (Callable, optional): Gradient of ``potential_func``. Uses
+            automatic differentiation when ``None``.
+        n_chains_per_group (int): Number of chains per ensemble group.
+            Defaults to ``5``.
+        step_size (float): Base step size for the leapfrog integrator. Defaults
+            to ``0.01``.
+        L (int): Number of leapfrog substeps per proposal. Defaults to ``10``.
+        beta (float): Interaction strength between ensembles. Defaults to
+            ``0.05``.
+        n_thin (int): Thinning factor; keep every ``n_thin`` samples. Defaults
+            to ``1``.
+        key (jax.random.PRNGKey): Random number generator key. Defaults to
+            ``jax.random.PRNGKey(0)``.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray]: Array of states with shape
+            ``(total_iterations, 2 * n_chains_per_group, dim)`` and acceptance
+            rates per chain with shape ``(2 * n_chains_per_group,)`` where
+            ``total_iterations = n_samples * n_thin``.
     """
     # JIT
     potential_func_vmap = jax.jit(jax.vmap(potential_func))           # F: (n_chains, dim) -> (n_chains,)
