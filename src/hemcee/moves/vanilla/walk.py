@@ -22,8 +22,9 @@ def walk_move(
 
     m = jnp.mean(group2, axis=0)                     # (dim,)
     xi = jax.random.normal(key_noise, (num_chains_per_group,))    # (n_chains,)
-    centered = group2 - m                             # (n_chains, dim)
-    group1_proposed = group1 + jnp.sum(centered * xi[:, None], axis=0) / jnp.sqrt(num_chains_per_group)
+    
+    noisy_centered = jnp.einsum('bi, b -> i', group2 - m, xi) / jnp.sqrt(num_chains_per_group) # (dim,)
+    group1_proposed = group1 + noisy_centered[None, :] # (n_chains, dim)
 
     log_accept_prob = potential_func_vmap(group1) - potential_func_vmap(group1_proposed)
     
