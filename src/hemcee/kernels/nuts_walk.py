@@ -534,7 +534,6 @@ def test_ensemble_nuts():
         tuple[jnp.ndarray, dict]: Samples drawn from the test problem and the
             corresponding diagnostics.
     """
-
     import time
     import numpy as np
     jax.config.update("jax_enable_x64", True)

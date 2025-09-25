@@ -1,10 +1,12 @@
-import jax 
+"""Hamiltonian Monte Carlo kernels and integrators."""
+
+import jax
 import jax.numpy as jnp
 from typing import Callable, Optional
 
 
-def leapfrog(x: jnp.ndarray, p: jnp.ndarray, grad_fn: callable, step_size: float, L: int):
-    """Run a vectorized leapfrog integrator.
+def leapfrog(x: jnp.ndarray, p: jnp.ndarray, grad_fn: Callable, step_size: float, L: int):
+    r"""Run a vectorized leapfrog integrator.
 
     Args:
         x (jnp.ndarray): Current position with shape ``(n_chains, dim)``.
@@ -84,7 +86,6 @@ def hmc(log_prob: Callable,
         Metropolis-Hastings correction. NaN gradients are replaced with zeros,
         and the implementation is vectorized over chains.
     """
-
     ### Setup
     # JIT access to functions
     log_prob_fn = jax.jit(jax.vmap(log_prob))

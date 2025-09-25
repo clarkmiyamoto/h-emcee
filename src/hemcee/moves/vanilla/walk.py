@@ -3,20 +3,26 @@ import jax.numpy as jnp
 from typing import Callable
 
 def walk_move(
-    group1: jnp.ndarray, group2: jnp.ndarray,
+    group1: jnp.ndarray,
+    group2: jnp.ndarray,
     key: jax.random.PRNGKey,
     potential_func_vmap: Callable,
-    **kwargs):
-    '''
-    Walk Move sampler implementation using JAX.
-    Algorithm (4) in https://arxiv.org/pdf/2505.02987.
+    **kwargs,
+):
+    """Propose a walk move for the affine-invariant sampler.
+
+    Implements Algorithm (4) from https://arxiv.org/pdf/2505.02987.
 
     Args:
-        group1: Shape (n_chains_per_group, dim)
-        group2: Shape (n_chains_per_group, dim)
-        key: JAX random key
-        potential_func_vmap: Potential function vectorized
-    '''
+        group1 (jnp.ndarray): Proposal group with shape ``(n_chains_per_group, dim)``.
+        group2 (jnp.ndarray): Complementary group with shape ``(n_chains_per_group, dim)``.
+        key (jax.random.PRNGKey): Random number generator key.
+        potential_func_vmap (Callable): Vectorised potential energy function.
+
+    Returns:
+        Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
+        probabilities for each chain.
+    """
     key_noise, key_accept = jax.random.split(key, 2)
     num_chains_per_group = int(group1.shape[0])
 
