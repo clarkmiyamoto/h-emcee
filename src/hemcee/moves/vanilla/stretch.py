@@ -7,17 +7,23 @@ def stretch_move(
     key: jax.random.PRNGKey,
     log_prob_vmap: Callable,
     stretch: float = 2.0):
-    '''
-    Stretch Move sampler implementation using JAX.
-    Algorithm (1) in https://arxiv.org/pdf/2505.02987.
+    """Perform the affine-invariant stretch move.
+
+    Implements Algorithm 1 from https://arxiv.org/pdf/2505.02987.
 
     Args:
-        group1: Shape (n_chains_per_group, dim)
-        group2: Shape (n_chains_per_group, dim)
-        key: JAX random key
-        log_prob_vmap: Log probability function vectorized
-        stretch: Stretch parameter, must be >= 1. Default to 2.
-    '''
+        group1 (jnp.ndarray): Ensemble group being updated with shape
+            ``(n_chains_per_group, dim)``.
+        group2 (jnp.ndarray): Complement ensemble group with the same shape as
+            ``group1``.
+        key (jax.random.PRNGKey): Random number generator key.
+        log_prob_vmap (Callable): Vectorized log-probability function.
+        stretch (float): Stretch parameter ``a`` satisfying ``a >= 1``.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray]: Proposed positions for ``group1`` and
+            their log acceptance probabilities.
+    """
     n_chains_per_group = int(group1.shape[0])
     dim = int(group1.shape[1])
 
@@ -42,8 +48,16 @@ def stretch_move(
     return group1_proposed, log_accept_prob
 
 def sample_inv_sqrt_density(key: jax.random.PRNGKey, a: float, shape=()):
-    """
-    Sample from density proportional to z^{-1/2} on [1/a, a], with a >= 1.
+    """Sample from the ``z^{-1/2}`` density on ``[1/a, a]``.
+
+    Args:
+        key (jax.random.PRNGKey): Random number generator key.
+        a (float): Stretch parameter satisfying ``a >= 1``.
+        shape (tuple, optional): Output shape. Defaults to ``()``.
+
+    Returns:
+        jnp.ndarray: Samples drawn from the inverse square-root density with
+            the requested shape.
     """
     a = jnp.asarray(a, dtype=jnp.float_)
     u = jax.random.uniform(key, shape=shape, dtype=jnp.float_)  # U(0,1)

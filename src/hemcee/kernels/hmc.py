@@ -4,19 +4,20 @@ from typing import Callable, Optional
 
 
 def leapfrog(x: jnp.ndarray, p: jnp.ndarray, grad_fn: callable, step_size: float, L: int):
-    """
-    Vectorised leap-frog integrator without Python-side conditionals.
+    """Run a vectorized leapfrog integrator.
 
     Args:
-        - x: current position. Shape (n_chains, dim)
-        - p: current momentum. Shape (n_chains, dim)
-        - grad_fn: callable - ∇log π(x). Function of shape (n_chains, dim) -> (n_chains, dim)
-        - step_size: Step size.
-        - L: Number of leap-frog steps
+        x (jnp.ndarray): Current position with shape ``(n_chains, dim)``.
+        p (jnp.ndarray): Current momentum with shape ``(n_chains, dim)``.
+        grad_fn (Callable): Gradient of the log density :math:`\nabla \log \pi(x)`
+            mapping arrays of shape ``(n_chains, dim)`` to gradients of the
+            same shape.
+        step_size (float): Integration step size.
+        L (int): Number of leapfrog steps to integrate.
 
     Returns:
-        - x: proposed position. Shape (n_chains, dim)
-        - p: proposed momentum. Shape (n_chains, dim)
+        tuple[jnp.ndarray, jnp.ndarray]: Proposed position and momentum with
+            shape ``(n_chains, dim)``.
     """
     # initial half step for momentum
     x_grad = jnp.nan_to_num(grad_fn(x), nan=0.0)
@@ -53,36 +54,35 @@ def hmc(log_prob: Callable,
         n_chains: int = 1,
         n_thin: int = 1,
         key: jax.random.PRNGKey = jax.random.PRNGKey(0)):
-    """Hamiltonian Monte Carlo (HMC) sampler implementation using JAX.
-    
-    This function implements the HMC algorithm, which uses Hamiltonian dynamics to propose
-    new states in the Markov chain. It supports multiple chains and thinning of samples.
-    
+    """Run a Hamiltonian Monte Carlo (HMC) sampler.
+
     Args:
-        log_prob: Function that computes the log probability density of the target distribution.
-                 Should take a single argument (parameters) (shaped (dim,)) and return a scalar.
-        initial: Initial parameter values for the Markov chains. Shape (dim,)
-        n_samples: Number of samples to generate per chain
-        step_size: Step size for the leapfrog integrator. Controls the discretization of
-                Hamiltonian dynamics. Default: 0.1
-        L: Number of leapfrog steps per proposal. Controls how far each proposal can move.
-           Default: 10
-        n_chains: Number of independent Markov chains to run in parallel. Default: 1
-        n_thin: Thinning interval for the samples. Only every nth sample is stored.
-                Default: 1 (no thinning)
-        key: JAX random key for reproducibility. Default: jax.random.PRNGKey(0)
-    
+        log_prob (Callable): Log-probability function for the target
+            distribution that accepts a ``(dim,)`` array and returns a scalar.
+        initial (jnp.ndarray): Initial parameter vector of shape ``(dim,)``
+            used for all chains.
+        n_samples (int): Number of samples to draw per chain after thinning.
+        grad_fn (Callable, optional): Gradient of ``log_prob``. When ``None``
+            the gradient is computed using ``jax.grad``. Defaults to ``None``.
+        step_size (float): Step size for the leapfrog integrator. Defaults to
+            ``0.1``.
+        L (int): Number of leapfrog steps to take per proposal. Defaults to
+            ``10``.
+        n_chains (int): Number of parallel chains to simulate. Defaults to ``1``.
+        n_thin (int): Thinning interval; store every ``n_thin`` samples.
+            Defaults to ``1`` (no thinning).
+        key (jax.random.PRNGKey): Random number generator key. Defaults to
+            ``jax.random.PRNGKey(0)``.
+
     Returns:
-        tuple: A tuple containing:
-            - samples: Array of shape (n_chains, n_samples, dim) containing the MCMC samples
-            - acceptance_rates: Array of shape (n_chains,) containing the acceptance rate
-                              for each chain
-    
+        tuple[jnp.ndarray, jnp.ndarray]: Tuple containing the samples with
+            shape ``(n_chains, n_samples, dim)`` and the acceptance rate for
+            each chain with shape ``(n_chains,)``.
+
     Notes:
-        - The algorithm uses the leapfrog integrator to simulate Hamiltonian dynamics
-        - Metropolis-Hastings acceptance is used to ensure detailed balance
-        - NaN gradients are handled by replacing them with zeros
-        - The implementation is vectorized to run multiple chains in parallel
+        The algorithm uses a leapfrog integrator followed by a
+        Metropolis-Hastings correction. NaN gradients are replaced with zeros,
+        and the implementation is vectorized over chains.
     """
 
     ### Setup

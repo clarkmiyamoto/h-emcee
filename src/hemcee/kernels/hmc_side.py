@@ -2,26 +2,33 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 
-def leapfrog_side_move(q1, 
-                       p1_current, 
-                       grad_fn, 
-                       beta_eps, 
+def leapfrog_side_move(q1,
+                       p1_current,
+                       grad_fn,
+                       beta_eps,
                        L,
                        n_chains_per_group,
                        diff_particles_group2):
-    '''
-    Args
-        - q1: position of first group of chains. Shape (n_chains_per_group, dim)
-        - p1: momentum of first group of chains. Shape (n_chains_per_group,)
-        - grad_fn: gradient of the potential function. Function of shape (n_chains, dim) -> (n_chains, dim)
-        - beta_eps: half of the step size. Scalar
-        - L: number of leapfrog steps. Scalar
-        - L: number of leapfrog steps
-    
-    Returns
-        - q1: position of first group of chains. Shape (n_chains_per_group, dim)
-        - p1_current: momentum of first group of chains. Shape (n_chains_per_group,)
-    '''
+    """Integrate the side-move leapfrog dynamics.
+
+    Args:
+        q1 (jnp.ndarray): Positions for the first group with shape
+            ``(n_chains_per_group, dim)``.
+        p1_current (jnp.ndarray): Momenta for the first group with shape
+            ``(n_chains_per_group,)``.
+        grad_fn (Callable): Gradient of the potential function mapping arrays
+            of shape ``(n_chains_per_group, dim)`` to the same shape.
+        beta_eps (float): Product of the interaction strength and step size.
+        L (int): Number of leapfrog integration steps.
+        n_chains_per_group (int): Number of chains per group.
+        diff_particles_group2 (jnp.ndarray): Difference vectors constructed
+            from the second group with shape ``(n_chains_per_group, dim)``.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray]: Updated positions and momenta for the
+            first group with shapes ``(n_chains_per_group, dim)`` and
+            ``(n_chains_per_group,)`` respectively.
+    """
     # Initial half-step for momentum - VECTORIZED
     grad1 = grad_fn(q1) # Shape (n_chains_per_group, dim)
     grad1 = jnp.nan_to_num(grad1, nan=0.0)
@@ -50,56 +57,47 @@ def leapfrog_side_move(q1,
 
     return q1, p1_current # Shape (n_chains_per_group, dim), (n_chains_per_group,)
 
-def hamiltonian_side_move(potential_func: Callable, 
-                          initial: jnp.ndarray, 
+def hamiltonian_side_move(potential_func: Callable,
+                          initial: jnp.ndarray,
                           n_samples: int,
-                          grad_fn: Callable = None, 
+                          grad_fn: Callable = None,
                           n_chains_per_group: int = 5,
-                          step_size: float = 0.01, 
-                          L: int = 10, 
+                          step_size: float = 0.01,
+                          L: int = 10,
                           beta: float = 1.0,
                           n_thin = 1,
                           key=jax.random.PRNGKey(0)):
-    """Hamiltonian Side Move (HSM) sampler implementation using JAX.
-    
-    This function implements the HSM algorithm, which uses Hamiltonian dynamics with side moves
-    to propose new states in the Markov chain. It maintains two groups of chains that interact
-    with each other through Hamiltonian dynamics, allowing for better exploration of the target
-    distribution. It supports multiple chains per group and thinning of samples.
-    
+    """Run the Hamiltonian Side Move (HSM) sampler.
+
     Args:
-        potential_func: Function that computes the potential energy (negative log probability)
-                       of the target distribution. Should take a single argument (parameters)
-                       and return a scalar.
-        initial: Initial parameter values for the Markov chains. Can be any shape, will be
-                flattened internally.
-        n_samples: Number of samples to generate per chain
-        n_chains_per_group: Number of chains in each of the two groups. Total number of chains
-                           will be 2 * n_chains_per_group. Default: 5
-        step_size: Step size for the leapfrog integrator. Controls the discretization of
-                Hamiltonian dynamics. Default: 0.01
-        L: Number of leapfrog steps per proposal. Controls how far each proposal
-                   can move. Default: 10
-        beta: Temperature parameter that controls the strength of the Hamiltonian dynamics.
-              Higher values lead to more aggressive exploration. Default: 1.0
-        n_thin: Thinning interval for the samples. Only every nth sample is stored.
-                Default: 1 (no thinning)
-        key: JAX random key for reproducibility. Default: jax.random.PRNGKey(0)
-    
+        potential_func (Callable): Potential energy (negative log-density)
+            function accepting a ``(dim,)`` array and returning a scalar.
+        initial (jnp.ndarray): Initial parameters broadcast to all chains; the
+            array is flattened internally.
+        n_samples (int): Number of samples to draw for each chain.
+        grad_fn (Callable, optional): Gradient of ``potential_func``. Defaults
+            to automatic differentiation when ``None``.
+        n_chains_per_group (int): Number of chains per interacting group.
+            Defaults to ``5``.
+        step_size (float): Leapfrog integrator step size. Defaults to ``0.01``.
+        L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
+        beta (float): Interaction strength controlling exploration. Defaults
+            to ``1.0``.
+        n_thin (int): Thinning interval; retain every ``n_thin`` sample.
+            Defaults to ``1``.
+        key (jax.random.PRNGKey): Random number generator key. Defaults to
+            ``jax.random.PRNGKey(0)``.
+
     Returns:
-        tuple: A tuple containing:
-            - samples: Array of shape (2*n_chains_per_group, n_samples, *initial.shape)
-                      containing the MCMC samples
-            - acceptance_rates: Array of shape (2*n_chains_per_group,) containing the
-                              acceptance rate for each chain
-    
+        tuple[jnp.ndarray, jnp.ndarray]: Samples with shape
+            ``(2 * n_chains_per_group, n_samples, *initial.shape)`` and
+            acceptance rates per chain with shape ``(2 * n_chains_per_group,)``.
+
     Notes:
-        - The algorithm uses two groups of chains that interact through Hamiltonian dynamics
-        - Each chain in one group interacts with two randomly selected chains from the other group
-        - The interaction is mediated through the difference between the selected chains
-        - Metropolis-Hastings acceptance is used to ensure detailed balance
-        - NaN gradients are handled by replacing them with zeros
-        - The implementation is vectorized to run multiple chains in parallel
+        The sampler partitions the ensemble into two interacting groups,
+        proposes side moves using Hamiltonian dynamics, and applies a
+        Metropolis-Hastings correction. The implementation is fully
+        vectorized.
     """
 
     ### ERROR CHECKING

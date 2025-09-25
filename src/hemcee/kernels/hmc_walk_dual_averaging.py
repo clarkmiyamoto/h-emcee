@@ -4,21 +4,31 @@ from typing import Callable
 
 from hemcee.dual_averaging import DualAveraging
 
-def leapfrog_walk_move(q: jnp.ndarray, 
-                       p: jnp.ndarray, 
-                       grad_fn: Callable, 
-                       beta_eps: float, 
+def leapfrog_walk_move(q: jnp.ndarray,
+                       p: jnp.ndarray,
+                       grad_fn: Callable,
+                       beta_eps: float,
                        L: int,
                        centered: jnp.ndarray):
-    '''
+    """Perform a leapfrog step for the dual-averaging walk move.
+
     Args:
-        q: Shape (n_chains_per_group, dim)
-        p: Shape (n_chinas_per_group, n_chains_per_group)
-        grad_fn: Gradient of log probabiltiy vectorized. Maps (batch_size, dim) -> (batch_size, dim)
-        beta_eps: beta times step size (epsilon)
-        L: Number of steps
-        centered: Shape (n_chains_per_group, dim)
-    '''
+        q (jnp.ndarray): Current positions with shape
+            ``(n_chains_per_group, dim)``.
+        p (jnp.ndarray): Current ensemble momenta with shape
+            ``(n_chains_per_group, n_chains_per_group)``.
+        grad_fn (Callable): Vectorized gradient mapping ``(batch_size, dim)``
+            arrays to the same shape.
+        beta_eps (float): Product of the coupling constant and current step
+            size.
+        L (int): Number of leapfrog substeps.
+        centered (jnp.ndarray): Centered complement ensemble with shape
+            ``(n_chains_per_group, dim)``.
+
+    Returns:
+        tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and momenta with
+            the same shapes as ``q`` and ``p``.
+    """
     grad = grad_fn(q) # Shape (n_chains_per_group, dim)
     grad = jnp.nan_to_num(grad, nan=0.0) 
 
@@ -41,13 +51,13 @@ def leapfrog_walk_move(q: jnp.ndarray,
 
     return q, p
 
-def hamiltonian_walk_move_dual_averaging(potential_func: Callable, 
-                          initial: jnp.ndarray, 
-                          n_samples: int, 
+def hamiltonian_walk_move_dual_averaging(potential_func: Callable,
+                          initial: jnp.ndarray,
+                          n_samples: int,
                           grad_fn: Callable = None,
-                          n_chains_per_group: int = 5, 
-                          epsilon: float = 0.1, 
-                          L: int = 10, 
+                          n_chains_per_group: int = 5,
+                          epsilon: float = 0.1,
+                          L: int = 10,
                           beta: float = 1.0,
                           n_thin=1,
                           n_warmup: int = 1000,
@@ -56,31 +66,42 @@ def hamiltonian_walk_move_dual_averaging(potential_func: Callable,
                           t0: float = 10.0,
                           kappa: float = 0.75,
                           key=jax.random.PRNGKey(0)):
-    """
-    Hamiltonian Walk Move (HWM) sampler implementation using JAX with dual averaging step size adaptation.
-    
+    """Run the dual-averaging Hamiltonian Walk Move sampler.
+
     Args:
-        potential_func: Function that computes the negative log probability.
-        initial: Initial position for all chains.
-        n_samples: Number of samples to generate.
-        grad_fn: Optional gradient function. If None, uses JAX autodiff.
-        n_chains_per_group: Number of chains per group (total chains = 2 * n_chains_per_group).
-        epsilon: Initial step size.
-        L: Number of leapfrog steps.
-        beta: Coupling parameter between chains.
-        n_thin: Thinning factor (samples every n_thin iterations).
-        n_warmup: Number of warmup iterations for dual averaging.
-        target_accept: Target acceptance rate for dual averaging.
-        gamma: Dual averaging parameter.
-        t0: Dual averaging parameter.
-        kappa: Dual averaging parameter.
-        key: JAX random key.
-    
+        potential_func (Callable): Potential energy (negative log-density)
+            function returning scalars for ``(dim,)`` inputs.
+        initial (jnp.ndarray): Initial parameters broadcast to all chains.
+        n_samples (int): Number of samples to collect per chain.
+        grad_fn (Callable, optional): Gradient of ``potential_func``. Uses
+            automatic differentiation when ``None``.
+        n_chains_per_group (int): Number of chains per ensemble group.
+            Defaults to ``5``.
+        epsilon (float): Initial step size for the leapfrog integrator.
+        L (int): Number of leapfrog substeps per proposal. Defaults to ``10``.
+        beta (float): Interaction strength between ensembles. Defaults to
+            ``1.0``.
+        n_thin (int): Thinning interval; keep every ``n_thin`` sample.
+            Defaults to ``1``.
+        n_warmup (int): Number of warmup iterations for dual averaging.
+            Defaults to ``1000``.
+        target_accept (float): Target acceptance rate for dual averaging.
+            Defaults to ``0.65``.
+        gamma (float): Dual averaging parameter controlling shrinkage.
+            Defaults to ``0.05``.
+        t0 (float): Dual averaging parameter controlling initial stability.
+            Defaults to ``10.0``.
+        kappa (float): Dual averaging parameter controlling adaptation speed.
+            Defaults to ``0.75``.
+        key (jax.random.PRNGKey): Random number generator key. Defaults to
+            ``jax.random.PRNGKey(0)``.
+
     Returns:
-        Tuple of (samples, acceptance_rates, final_epsilon)
-        - samples: Array of shape (n_samples, total_chains, dim)
-        - acceptance_rates: Array of shape (total_chains,)
-        - final_epsilon: Final adapted step size
+        tuple[jnp.ndarray, jnp.ndarray, float]: Tuple containing the states
+            with shape ``(total_iterations, 2 * n_chains_per_group, dim)``,
+            acceptance rates with shape ``(2 * n_chains_per_group,)``, and the
+            final adapted step size where
+            ``total_iterations = n_samples * n_thin``.
     """
     # JIT
     potential_func_vmap = jax.jit(jax.vmap(potential_func))           # F: (n_chains, dim) -> (n_chains,)
