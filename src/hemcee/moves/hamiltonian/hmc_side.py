@@ -78,8 +78,8 @@ def hmc_side_move(
 
 
 def leapfrog_side_move(
-    q1: jnp.ndarray,
-    p1_current: jnp.ndarray,
+    q: jnp.ndarray,
+    p: jnp.ndarray,
     grad_log_prob: Callable,
     beta_eps: float,
     L: int,
@@ -88,9 +88,9 @@ def leapfrog_side_move(
     """Perform leapfrog integration for the Hamiltonian side move.
 
     Args:
-        q1 (jnp.ndarray): Positions of the first group of chains with shape
+        q (jnp.ndarray): Positions of the first group of chains with shape
             ``(n_chains_per_group, dim)``.
-        p1_current (jnp.ndarray): Momenta of the first group of chains with shape
+        p (jnp.ndarray): Momenta of the first group of chains with shape
             ``(n_chains_per_group,)``.
         grad_log_prob (Callable): Vectorised gradient of the log-probability function
             mapping ``(n_chains, dim)`` to ``(n_chains, dim)``.
@@ -104,26 +104,25 @@ def leapfrog_side_move(
         first group of chains.
     """
     # Initial half-step for momentum - VECTORIZED
-    grad1 = -1 * grad_log_prob(q1) # Shape (n_chains_per_group, dim)
+    grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+    gradient_projections = jnp.sum(grad * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
     
-    # Compute dot products between gradients and difference particles - VECTORIZED
-    gradient_projections = jnp.sum(grad1 * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
-    p1_current -= 0.5 * beta_eps * gradient_projections # Shape (n_chains_per_group,)
+    p -= 0.5 * beta_eps * gradient_projections # Shape (n_chains_per_group,)
 
     # Full leapfrog steps
     for step in range(L):
-        q1 += beta_eps * (jnp.expand_dims(p1_current, axis=1) * diff_particles_group2) # Shape: (n_chains_per_group, dim)
+        q += beta_eps * (jnp.expand_dims(p, axis=1) * diff_particles_group2) # Shape: (n_chains_per_group, dim)
         
         if (step < L - 1):
-            grad1 = -1 * grad_log_prob(q1) # Shape (n_chains_per_group, dim)
-
-            gradient_projections = jnp.sum(grad1 * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
-            p1_current -= beta_eps * gradient_projections # Shape (n_chains_per_group,)
+            grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+            gradient_projections = jnp.sum(grad * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
+            
+            p -= beta_eps * gradient_projections # Shape (n_chains_per_group,)
     
     # Final half-step for momentum - VECTORIZED 
-    grad1 = -1 * grad_log_prob(q1)
+    grad = -1 * grad_log_prob(q)
+    gradient_projections = jnp.sum(grad * diff_particles_group2, axis=1)
+    
+    p -= 0.5 * beta_eps * gradient_projections
 
-    gradient_projections = jnp.sum(grad1 * diff_particles_group2, axis=1)
-    p1_current -= 0.5 * beta_eps * gradient_projections
-
-    return q1, p1_current # Shape (n_chains_per_group, dim), (n_chains_per_group,)
+    return q, p # Shape (n_chains_per_group, dim), (n_chains_per_group,)

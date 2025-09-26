@@ -58,7 +58,7 @@ def hmc_walk_move(
 def leapfrog_walk_move(
     q: jnp.ndarray,
     p: jnp.ndarray,
-    grad_fn: Callable,
+    grad_log_prob: Callable,
     beta_eps: float,
     L: int,
     centered: jnp.ndarray,
@@ -69,7 +69,7 @@ def leapfrog_walk_move(
         q (jnp.ndarray): Positions of the first group of chains with shape
             ``(n_chains_per_group, dim)``.
         p (jnp.ndarray): Momenta matrix with shape ``(n_chains_per_group, n_chains_per_group)``.
-        grad_fn (Callable): Vectorised gradient of the log probability mapping
+        grad_log_prob (Callable): Vectorised gradient of the log probability mapping
             ``(batch_size, dim)`` to ``(batch_size, dim)``.
         beta_eps (float): Step size scaled by ``beta``.
         L (int): Number of leapfrog steps.
@@ -79,18 +79,19 @@ def leapfrog_walk_move(
     Returns:
         Tuple[jnp.ndarray, jnp.ndarray]: Updated positions and momenta.
     """
-    grad = grad_fn(q) # Shape (n_chains_per_group, dim)
-    p += 0.5 * beta_eps * jnp.dot(grad, centered.T) # Shape (n_chains_per_group, n_chains_per_group)
+    grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+    
+    p -= 0.5 * beta_eps * jnp.dot(grad, centered.T) # Shape (n_chains_per_group, n_chains_per_group)
    
     for step in range(L):
         q += beta_eps * jnp.dot(p, centered) # Shape (n_chains_per_group, dim)
 
         if (step < L - 1):
-            grad = grad_fn(q) # Shape (n_chains_per_group, dim)
-            p += beta_eps * jnp.dot(grad, centered.T)
+            grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+            p -= beta_eps * jnp.dot(grad, centered.T)
 
-    grad = grad_fn(q) # Shape (n_chains_per_group, dim)
-    p += 0.5 * beta_eps * jnp.dot(grad, centered.T)
+    grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+    p -= 0.5 * beta_eps * jnp.dot(grad, centered.T)
 
     return q, p
     
