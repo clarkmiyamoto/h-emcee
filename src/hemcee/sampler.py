@@ -1,4 +1,9 @@
-"""High-level sampler implementations for hemcee."""
+"""
+High-level sampler implementations for hemcee.
+
+TODO: Prevent the user from making stupid mistakes like wrong graident,
+  remove this entirley, and only allow jax to grad it.
+"""
 
 from __future__ import annotations
 
@@ -35,7 +40,6 @@ class HamiltonianEnsembleSampler:
         total_chains: int,
         dim: int,
         log_prob: Callable,
-        grad_log_prob: Callable = None,
         step_size: float = 0.2,
         L: int = 10,
         move = hmc_walk_move,
@@ -51,10 +55,7 @@ class HamiltonianEnsembleSampler:
             total_chains (int): Total number of chains in the ensemble.
             dim (int): Dimensionality of the target distribution.
             log_prob (Callable): Callable returning the log density of the
-                target distribution.
-            grad_log_prob (Callable, optional): Callable returning the gradient
-                of ``log_prob``. Defaults to ``None`` to compute gradients via
-                ``jax.grad``.
+                target distribution (doesn't need to be normalized).
             step_size (float): Leapfrog step size. Defaults to ``0.2``.
             L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
             move (Callable): Proposal function used for ensemble updates.
@@ -76,10 +77,7 @@ class HamiltonianEnsembleSampler:
         self.dim = int(dim)
 
         self.log_prob = jax.jit(jax.vmap(log_prob))
-        if grad_log_prob is None:
-            self.grad_log_prob = jax.jit(jax.vmap(jax.grad(log_prob)))
-        else:
-            self.grad_log_prob = jax.jit(jax.vmap(grad_log_prob))
+        self.grad_log_prob = jax.jit(jax.vmap(jax.grad(log_prob)))
         
         self.step_size = step_size
         self.L = L
@@ -221,8 +219,6 @@ class HamiltonianEnsembleSampler:
             
             return (group1, group2, da_state, new_diagnostics), final_states
             
-            
-        
         # Create iteration indices for dual averaging
         iterations = jnp.arange(total_samples)
         scan_input = (keys, iterations)

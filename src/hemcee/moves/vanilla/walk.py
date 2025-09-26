@@ -6,7 +6,7 @@ def walk_move(
     group1: jnp.ndarray,
     group2: jnp.ndarray,
     key: jax.random.PRNGKey,
-    potential_func_vmap: Callable,
+    log_prob: Callable,
     **kwargs,
 ):
     """Propose a walk move for the affine-invariant sampler.
@@ -17,7 +17,7 @@ def walk_move(
         group1 (jnp.ndarray): Proposal group with shape ``(n_chains_per_group, dim)``.
         group2 (jnp.ndarray): Complementary group with shape ``(n_chains_per_group, dim)``.
         key (jax.random.PRNGKey): Random number generator key.
-        potential_func_vmap (Callable): Vectorised potential energy function.
+        log_prob (Callable): Vectorised log-probability function.
 
     Returns:
         Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
@@ -32,6 +32,6 @@ def walk_move(
     noisy_centered = jnp.einsum('bi, b -> i', group2 - m, xi) / jnp.sqrt(num_chains_per_group) # (dim,)
     group1_proposed = group1 + noisy_centered[None, :] # (n_chains, dim)
 
-    log_accept_prob = potential_func_vmap(group1) - potential_func_vmap(group1_proposed)
+    log_accept_prob = log_prob(group1_proposed) - log_prob(group1)
     
     return group1_proposed, log_accept_prob

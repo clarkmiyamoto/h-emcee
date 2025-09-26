@@ -5,7 +5,7 @@ from typing import Callable
 def stretch_move(
     group1: jnp.ndarray, group2: jnp.ndarray,
     key: jax.random.PRNGKey,
-    log_prob_vmap: Callable,
+    log_prob: Callable,
     stretch: float = 2.0):
     """Perform the affine-invariant stretch move.
 
@@ -17,7 +17,7 @@ def stretch_move(
         group2 (jnp.ndarray): Complement ensemble group with the same shape as
             ``group1``.
         key (jax.random.PRNGKey): Random number generator key.
-        log_prob_vmap (Callable): Vectorized log-probability function.
+        log_prob (Callable): Vectorized log-probability function.
         stretch (float): Stretch parameter ``a`` satisfying ``a >= 1``.
 
     Returns:
@@ -43,7 +43,7 @@ def stretch_move(
     z = sample_inv_sqrt_density(key_stretch, a=stretch, shape=(n_chains_per_group,))
     group1_proposed = group2[random_indices] + z[:, None] * (group1 - group2[random_indices])
 
-    log_accept_prob = (dim - 1) * jnp.log(z) + log_prob_vmap(group1) - log_prob_vmap(group1_proposed)
+    log_accept_prob = (dim - 1) * jnp.log(z) + log_prob(group1_proposed) - log_prob(group1) 
 
     return group1_proposed, log_accept_prob
 

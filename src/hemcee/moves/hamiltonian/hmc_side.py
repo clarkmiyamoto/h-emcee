@@ -2,13 +2,18 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 
+'''
+TODO: If there are nan's you want the program to crash
+      Code must also be -inf safe.
+'''
+
 def hmc_side_move(
     group1: jnp.ndarray,
     group2: jnp.ndarray,
     step_size: float,
     key: jax.random.PRNGKey,
-    potential_func_vmap: Callable,
-    grad_potential_func_vmap: Callable,
+    log_prob: Callable,
+    grad_log_prob: Callable,
     L: int,
 ):
     """Propose a Hamiltonian side move.
@@ -20,8 +25,8 @@ def hmc_side_move(
         group2 (jnp.ndarray): Complementary group with shape ``(n_chains_per_group, dim)``.
         step_size (float): Leapfrog step size.
         key (jax.random.PRNGKey): Random number generator key.
-        potential_func_vmap (Callable): Vectorised potential energy function.
-        grad_potential_func_vmap (Callable): Vectorised gradient of the potential function.
+        log_prob (Callable): Vectorised log-probability function.
+        grad_log_prob (Callable): Vectorised gradient of the log-probability function.
         L (int): Number of leapfrog steps.
 
     Returns:
@@ -29,6 +34,7 @@ def hmc_side_move(
         probabilities for each chain.
     """
     n_chains_per_group = int(group1.shape[0])
+    dim = int(group1.shape[1])
 
     keys = jax.random.split(key, n_chains_per_group + 2)
     key_choices = keys[0:n_chains_per_group]
@@ -45,23 +51,23 @@ def hmc_side_move(
     random_indices1_from_group2 = choices[:, 0]
     random_indices2_from_group2 = choices[:, 1]
 
-    diff_particles_group2 = (group2[random_indices1_from_group2] - group2[random_indices2_from_group2]) / jnp.sqrt(2*n_chains_per_group) # Shape (n_chains_per_group, dim)
+    diff_particles_group2 = (group2[random_indices1_from_group2] - group2[random_indices2_from_group2]) / jnp.sqrt(2*dim) # Shape (n_chains_per_group, dim)
 
     momentum = jax.random.normal(key_momentum, shape=(n_chains_per_group,))
 
     group1_proposed, momentum_proposed = leapfrog_side_move(
             group1, 
             momentum, 
-            grad_potential_func_vmap, 
+            grad_log_prob, 
             step_size, 
             L, 
             diff_particles_group2
     )
 
-    current_U1 = potential_func_vmap(group1) # Shape (n_chains_per_group, dim) -> (n_chains_per_group,)
+    current_U1 = -1 * log_prob(group1) # Shape (n_chains_per_group, dim) -> (n_chains_per_group,)
     current_K1 = 0.5 * momentum**2
 
-    proposed_U1 = potential_func_vmap(group1_proposed) # Shape (n_chains_per_group,)
+    proposed_U1 = -1 * log_prob(group1_proposed) # Shape (n_chains_per_group,)
     proposed_K1 = 0.5 * momentum_proposed**2
 
     dH1 = (proposed_U1 + proposed_K1) - (current_U1 + current_K1) # Shape (n_chains_per_group,)
@@ -74,7 +80,7 @@ def hmc_side_move(
 def leapfrog_side_move(
     q1: jnp.ndarray,
     p1_current: jnp.ndarray,
-    grad_fn: Callable,
+    grad_log_prob: Callable,
     beta_eps: float,
     L: int,
     diff_particles_group2: jnp.ndarray,
@@ -86,7 +92,7 @@ def leapfrog_side_move(
             ``(n_chains_per_group, dim)``.
         p1_current (jnp.ndarray): Momenta of the first group of chains with shape
             ``(n_chains_per_group,)``.
-        grad_fn (Callable): Vectorised gradient of the potential function
+        grad_log_prob (Callable): Vectorised gradient of the log-probability function
             mapping ``(n_chains, dim)`` to ``(n_chains, dim)``.
         beta_eps (float): Step size scaled by ``beta``.
         L (int): Number of leapfrog steps.
@@ -98,8 +104,7 @@ def leapfrog_side_move(
         first group of chains.
     """
     # Initial half-step for momentum - VECTORIZED
-    grad1 = grad_fn(q1) # Shape (n_chains_per_group, dim)
-    grad1 = jnp.nan_to_num(grad1, nan=0.0)
+    grad1 = -1 * grad_log_prob(q1) # Shape (n_chains_per_group, dim)
     
     # Compute dot products between gradients and difference particles - VECTORIZED
     gradient_projections = jnp.sum(grad1 * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
@@ -110,15 +115,13 @@ def leapfrog_side_move(
         q1 += beta_eps * (jnp.expand_dims(p1_current, axis=1) * diff_particles_group2) # Shape: (n_chains_per_group, dim)
         
         if (step < L - 1):
-            grad1 = grad_fn(q1) # Shape (n_chains_per_group, dim)
-            grad1 = jnp.nan_to_num(grad1, nan=0.0)
+            grad1 = -1 * grad_log_prob(q1) # Shape (n_chains_per_group, dim)
 
             gradient_projections = jnp.sum(grad1 * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
             p1_current -= beta_eps * gradient_projections # Shape (n_chains_per_group,)
     
     # Final half-step for momentum - VECTORIZED 
-    grad1 = grad_fn(q1)
-    grad1 = jnp.nan_to_num(grad1, nan=0.0)
+    grad1 = -1 * grad_log_prob(q1)
 
     gradient_projections = jnp.sum(grad1 * diff_particles_group2, axis=1)
     p1_current -= 0.5 * beta_eps * gradient_projections
