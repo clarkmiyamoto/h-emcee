@@ -3,10 +3,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hemcee"
+name = "h-emcee"
 version = "0.1.0"
-description = "Affine invariant hamiltonian samplers"
-readme = "README.md"
+description = "Affine-invariant Hamiltonian samplers"
+readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
 authors = [
     { name = "Clark Miyamoto" },
@@ -14,11 +14,19 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "jax",
+    "jax>=0.4.20",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
 [project.urls]
 Homepage = "https://github.com/clarkmiyamoto/hemcee"
+Repository = "https://github.com/clarkmiyamoto/hemcee"
+Issues = "https://github.com/clarkmiyamoto/hemcee/issues"
 
 # --- Dev extras (install with: pip install -e .[dev]) ---
 [project.optional-dependencies]
@@ -33,42 +41,45 @@ dev = [
     "pydocstyle>=6",
     "darglint",
 
-    # formatting (optional but nice)
+    # formatting
     "black>=24.0",
 ]
+
+# --- Tell setuptools about src/ layout ---
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hemcee*"]
+
+# If you ship non-Python data files inside hemcee/, uncomment:
+# [tool.setuptools.package-data]
+# hemcee = ["**/*"]
 
 # --- Lint config ---
 [tool.flake8]
 max-line-length = 100
-extend-ignore = ["E203", "W503"]        # common Black/pep8 interop
-select = ["E", "F", "W", "D"]           # include docstring rules (D- codes)
+extend-ignore = ["E203", "W503"]
+select = ["E", "F", "W", "D"]
 ignore = [
-  "D100",  # missing docstring in public module
-  "D101",  # missing docstring in public class
-  "D102",  # missing docstring in public method
-  "D103",  # missing docstring in public function
-  "D104",  # missing docstring in package
-  "D105",  # missing docstring in magic method
-  "D107",  # missing docstring in __init__
-  "D106",  # missing docstring in public nested class
+  "D100","D101","D102","D103","D104","D105","D106","D107",
 ]
 per-file-ignores = [
   "tests/*:D100,D101,D102,D103,D104,D105,D106,D107",
 ]
 
-# darglint = strict check that docstrings match signatures in Google style
 [tool.darglint]
 docstring_style = "google"
 strictness = "short"
-# ignore_regex = "(tests/)"
 
-# --- Pytest config (optional; handy in CI and locally) ---
+# --- Pytest config ---
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-q"
 testpaths = ["tests"]
 
-# --- Coverage config (optional; used by pytest-cov) ---
+# --- Coverage config ---
 [tool.coverage.run]
 source = ["src"]
 branch = true
@@ -77,6 +88,5 @@ branch = true
 show_missing = true
 skip_covered = true
 
-# Keep this if you use combined coverage paths (e.g., site-packages mirrors)
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]

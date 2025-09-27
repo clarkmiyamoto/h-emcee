@@ -18,19 +18,23 @@ The backend uses :code:`JAX`, which is installed automatically with :code:`pip`.
 Installation from source
 ------------------------
 
-Clone the package from the source:
+.. code-block:: bash
+
+    git clone https://github.com/clarkmiyamoto/hemcee.git
+    cd hemcee
+    pip install -e .
+
+The :code:`-e` (“editable”) install is handy if you're iterating on the code locally.
+
+Developer Installation
+----------------------
+
+It's recommended to make a fork of the repo, 
+clone the fork, and install the package in editable mode with the dev extras.
 
 .. code-block:: bash
 
-    git clone https://github.com/clarkmiyamoto/h-emcee.git
-
-Then use :code:`pip` to install:
-
-.. code-block:: bash
-
-    cd h-emcee
-    python -m pip install jax
-    python -m pip install -e .
+    pip install -e ".[dev]"
 
 Verify Installation
 -------------------
@@ -55,4 +59,4 @@ After installing, run all tests:
 .. code-block:: bash
 
     cd tests
-    python run_tests.py
+    python -m pytest
