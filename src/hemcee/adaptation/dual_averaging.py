@@ -12,6 +12,7 @@ class DAState(NamedTuple):
     log_epsilon_bar: jnp.ndarray
 
 class DAParameters(NamedTuple):
+    """Container for dual averaging hyper-parameters."""
     target_accept: float
     t0: float
     mu: float
