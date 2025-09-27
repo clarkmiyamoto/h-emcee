@@ -6,7 +6,6 @@ jax.config.update("jax_enable_x64", True)
 from hemcee.moves.hamiltonian.hmc_walk import leapfrog_walk_move
 from hemcee.moves.hamiltonian.hmc_side import leapfrog_side_move
 
-from hemcee.tests.distribution import make_gaussian
 from hemcee.tests.affine_invariance.tools import make_distributions_and_affine_transformation
 
 dim = 5

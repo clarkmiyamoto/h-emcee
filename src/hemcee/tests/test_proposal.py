@@ -58,7 +58,7 @@ def test_normal(
     else:
         raise ValueError(f"Invalid proposal: {proposal}")
 
-    samples, diagnostics = sampler.run_mcmc(keys[1], init, nsteps)
+    samples = sampler.run_mcmc(keys[1], init, nsteps)
     samples = samples.reshape(-1, ndim)
 
     # samples = np.array(samples).reshape(-1, ndim)
