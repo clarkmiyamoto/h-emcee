@@ -82,13 +82,20 @@ def leapfrog_walk_move(
     grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
     
     p -= 0.5 * beta_eps * jnp.dot(grad, centered.T) # Shape (n_chains_per_group, n_chains_per_group)
-   
-    for step in range(L):
+    
+    def leapfrog_step(step, state):
+        q, p = state
         q += beta_eps * jnp.dot(p, centered) # Shape (n_chains_per_group, dim)
-
-        if (step < L - 1):
+        
+        # Only update momentum if not the last step
+        def update_momentum(p):
             grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
-            p -= beta_eps * jnp.dot(grad, centered.T)
+            return p - beta_eps * jnp.dot(grad, centered.T)
+        
+        p = jax.lax.cond(step < L - 1, update_momentum, lambda p: p, p)
+        return q, p
+    
+    q, p = jax.lax.fori_loop(0, L, leapfrog_step, (q, p))
 
     grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
     p -= 0.5 * beta_eps * jnp.dot(grad, centered.T)

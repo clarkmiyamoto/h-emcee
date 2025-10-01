@@ -110,14 +110,19 @@ def leapfrog_side_move(
     p -= 0.5 * beta_eps * gradient_projections # Shape (n_chains_per_group,)
 
     # Full leapfrog steps
-    for step in range(L):
+    def leapfrog_step(step, state):
+        q, p = state
         q += beta_eps * (jnp.expand_dims(p, axis=1) * diff_particles_group2) # Shape: (n_chains_per_group, dim)
         
-        if (step < L - 1):
+        def update_momentum(p):
             grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
             gradient_projections = jnp.sum(grad * diff_particles_group2, axis=1) # Shape (n_chains_per_group,)
-            
-            p -= beta_eps * gradient_projections # Shape (n_chains_per_group,)
+            return p - beta_eps * gradient_projections # Shape (n_chains_per_group,)
+
+        p = jax.lax.cond(step < L - 1, update_momentum, lambda p: p, p)
+        return q, p
+    
+    q, p = jax.lax.fori_loop(0, L, leapfrog_step, (q, p))
     
     # Final half-step for momentum - VECTORIZED 
     grad = -1 * grad_log_prob(q)
