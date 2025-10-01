@@ -36,6 +36,7 @@ Navigating the documentation
    :caption: Tutorials
 
    tutorials/quickstart
+   tutorials/moves
 
 
 
