@@ -2,5 +2,6 @@
 
 from .sampler import HamiltonianEnsembleSampler
 from .sampler import EnsembleSampler
+from . import autocorr
 
-__all__ = ["HamiltonianEnsembleSampler"]
+__all__ = ["HamiltonianEnsembleSampler", "EnsembleSampler"]

@@ -3,14 +3,7 @@ Code from https://github.com/dfm/emcee/blob/main/src/emcee/autocorr.py
 Ported to JAX.
 '''
 
-import logging
-
 import jax.numpy as jnp
-
-__all__ = ["function_1d", "integrated_time", "AutocorrError"]
-
-logger = logging.getLogger(__name__)
-
 
 def next_pow_two(n):
     """Returns the next power of two greater than or equal to `n`"""
