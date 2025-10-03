@@ -397,6 +397,9 @@ class EnsembleSampler:
             
         if num_samples < 0:
             raise ValueError("`num_samples` must be 0 or greater.")
+
+        if (initial_state.shape[0] != self.total_chains) and (initial_state.shape[1] != self.dim):
+            raise ValueError("`inital_state` must have shape (total_chains, dim)")
         
         total_samples = warmup + num_samples * thin_by
 
@@ -450,6 +453,9 @@ class EnsembleSampler:
         # Thinning
         if thin_by > 1:
             post_warmup_samples = post_warmup_samples[::thin_by]
+
+        #### Logging
+        diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples
 
         self.diagnostics_main = diagnostics
 
