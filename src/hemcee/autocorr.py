@@ -2,14 +2,12 @@
 Code from https://github.com/dfm/emcee/blob/main/src/emcee/autocorr.py
 Ported to JAX.
 '''
-
+import jax
 import jax.numpy as jnp
 
 def next_pow_two(n):
     """Returns the next power of two greater than or equal to `n`"""
-    i = 1
-    while i < n:
-        i = i << 1
+    i = jax.lax.while_loop(lambda i: i < n, lambda i: i << 1, 1)
     return i
 
 
@@ -37,9 +35,7 @@ def function_1d(x):
 
 def auto_window(taus, c):
     m = jnp.arange(len(taus)) < c * taus
-    if jnp.any(m):
-        return jnp.argmin(m)
-    return len(taus) - 1
+    return jax.lax.cond(jnp.any(m), lambda _: jnp.argmin(m), lambda _: len(taus) - 1, operand=None)
 
 
 def integrated_time(x, c=5, tol=50, quiet=False, has_walkers=True):
