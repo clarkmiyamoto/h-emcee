@@ -84,19 +84,33 @@ def integrated_time(x, c=5, tol=50, quiet=False, has_walkers=True):
         raise ValueError("invalid dimensions")
 
     n_t, n_w, n_d = x.shape
-    tau_est = jnp.empty(n_d)
-    windows = jnp.empty(n_d, dtype=int)
-
-    # Loop over parameters
-    for d in range(n_d):
-        f = jnp.zeros(n_t)
-        for k in range(n_w):
-            f += function_1d(x[:, k, d])
-        f /= n_w
-        taus = 2.0 * jnp.cumsum(f) - 1.0
-        windows = windows.at[d].set(auto_window(taus, c))
-        tau_est = tau_est.at[d].set(taus[windows[d]])
-
+    
+    # Vectorized computation of autocorrelation functions for all walkers and parameters
+    # Reshape x to (n_t, n_w * n_d) to process all combinations at once
+    x_reshaped = x.reshape(n_t, n_w * n_d)
+    
+    # Compute autocorrelation functions for all walker-parameter combinations
+    # This replaces the nested loops over k and d
+    def compute_acf_for_all(x_flat):
+        return jax.vmap(function_1d)(x_flat.T).T  # Apply function_1d to each column
+    
+    acf_all = compute_acf_for_all(x_reshaped)
+    
+    # Reshape back to (n_t, n_w, n_d) and average over walkers
+    acf_all = acf_all.reshape(n_t, n_w, n_d)
+    f_avg = jnp.mean(acf_all, axis=1)  # Average over walkers: (n_t, n_d)
+    
+    # Compute cumulative sums and tau estimates for all parameters at once
+    taus = 2.0 * jnp.cumsum(f_avg, axis=0) - 1.0  # (n_t, n_d)
+    
+    # Vectorized window computation for all parameters
+    def compute_window_for_param(taus_param):
+        return auto_window(taus_param, c)
+    
+    windows = jax.vmap(compute_window_for_param)(taus.T)  # Apply to each parameter
+    
+    # Extract tau estimates using the computed windows
+    tau_est = jnp.array([taus[windows[d], d] for d in range(n_d)])
 
     # Check convergence
     flag = tol * tau_est > n_t

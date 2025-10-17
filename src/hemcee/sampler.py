@@ -11,11 +11,305 @@ from typing import Callable, Optional, Sequence, Tuple
 import jax
 import jax.numpy as jnp
 
+from hemcee.moves.hamiltonian.hmc import hmc
 from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
 from hemcee.moves.vanilla.walk import walk_move
 from hemcee.adaptation.dual_averaging import DAState, DAParameters, da_cond_update
 from hemcee.proposal import accept_proposal
 
+class HamiltonianSampler:
+    """Hamiltonian sampler with optional dual averaging.
+
+    Attributes:
+        total_chains (int): Total number of ensemble chains.
+        dim (int): Dimensionality of the target distribution.
+        log_prob (Callable): Vectorized log-probability function.
+        grad_log_prob (Callable): Vectorized gradient of the log probability.
+        step_size (float): Leapfrog step size.
+        inv_mass_matrix (jnp.ndarray): Inverted mass matrix. Shape (dim, dim).
+        L (int): Number of leapfrog steps per move.
+        move (Callable): Proposal function updating each ensemble group.
+        target_accept (float): Target acceptance probability for dual averaging.
+        t0 (float): Dual averaging stabilizer parameter.
+        mu (float): Dual averaging log step size offset.
+        gamma (float): Dual averaging shrinkage parameter.
+        kappa (float): Dual averaging adaptation rate.
+    """
+
+    def __init__(
+        self,
+        total_chains: int,
+        dim: int,
+        log_prob: Callable,
+        step_size: float = 0.2,
+        inv_mass_matrix: jnp.ndarray =  None,
+        L: int = 10,
+        move = hmc,
+    ) -> None:
+        """Initialise the sampler configuration.
+
+        Args:
+            total_chains (int): Total number of chains in the ensemble.
+            dim (int): Dimensionality of the target distribution.
+            log_prob (Callable): Callable returning the log density of the
+                target distribution (doesn't need to be normalized).
+            step_size (float): Leapfrog step size. Defaults to ``0.2``.
+            L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
+            move (Callable): Proposal function used for ensemble updates.
+            target_accept (float): Target acceptance rate used by dual
+                averaging. Defaults to ``0.8``.
+            t0 (float): Dual averaging stability parameter. Defaults to
+                ``10.0``.
+            mu (float): Dual averaging log step-size offset. Defaults to
+                ``0.05``.
+            gamma (float): Dual averaging shrinkage parameter. Defaults to
+                ``0.05``.
+            kappa (float): Dual averaging adaptation rate. Defaults to
+                ``0.75``.
+        """
+        if (total_chains < 4):
+            raise ValueError("`total_chains` must be at least 4 to form meaningful ensemble groups")
+        
+        self.total_chains = int(total_chains)
+        self.dim = int(dim)
+
+        self.move = move
+
+        self.log_prob = jax.jit(jax.vmap(log_prob))
+        self.grad_log_prob = jax.jit(jax.vmap(jax.grad(log_prob)))
+        
+        self.step_size = step_size
+        self.L = L
+        if inv_mass_matrix is None:
+            self.inv_mass_matrix = jnp.eye(dim)
+        else:    
+            self.inv_mass_matrix = inv_mass_matrix
+
+
+        # Dual Averaging parameters
+        self.da_state = DAState(
+            iteration=0,
+            step_size=step_size, 
+            H_bar=jnp.array(0.0), 
+            log_epsilon_bar=jnp.array(jnp.log(step_size)),
+        )
+        self.da_parameters = DAParameters(
+            target_accept=0.3, 
+            t0=10.0, 
+            mu=0.05, 
+            gamma=0.05, 
+            kappa=0.75,
+        )
+
+    def run_mcmc(self,
+                 key: jax.random.PRNGKey,
+                 initial_state: jnp.ndarray,
+                 num_samples: int,
+                 warmup: int = 1000,
+                 thin_by=1,
+                 adapt_step_size: bool = True,
+                 adapt_integration: bool = False,
+                 show_progress: bool = False,
+                 ) -> Tuple[jnp.ndarray, dict]:
+        """Run the Hamiltonian ensemble sampler.
+
+        Args:
+            key (jax.random.PRNGKey): Random number generator key.
+            initial_state (jnp.ndarray): Initial ensemble state with shape
+                ``(total_chains, dim)``.
+            num_samples (int): Number of post-warmup samples to retain.
+            warmup (int): Number of warmup iterations. Defaults to ``1000``.
+            thin_by (int): Keep every ``thin_by``
+                sample. Defaults to ``1`` (no thinning).
+            adapt_step_size (bool): Whether to adapt the step size via dual
+                averaging. Defaults to ``True``.
+            adapt_integration (bool): Whether to adapt integration settings
+                using affine-invariant NUTS. Defaults to ``False``.
+            show_progress (bool): Whether to display a progress bar. Defaults
+                to ``False``.
+
+        Returns:
+            tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
+            containing acceptance rates and dual averaging state.
+        """
+        ########################################################
+        # Check inputs for sanity
+        ########################################################
+        if show_progress:
+            raise NotImplementedError("`show_progress=True` is not supported yet")
+        
+        if adapt_integration:
+            raise NotImplementedError("`adapt_integration=True` is not supported yet")
+        
+        if thin_by < 1:
+            raise ValueError("`thinning` must 1 or greater.")
+
+        if warmup < 0:
+            raise ValueError("`warmup` must be 0 or greater.")
+
+        if num_samples < 0:
+            raise ValueError("`num_samples` must be 0 or greater.")
+        
+        ########################################################
+        # MCMC Code
+        ########################################################
+        print(f"Using {self.total_chains} total chains")
+        
+        # Warmup
+        # Contains dual averaging + ChEES updating
+        group1 = self._mcmc_warmup(key, initial_state, warmup, self.da_state, self.da_parameters)
+
+        # Main sampling
+        # Statically sets step size & integration length from warmup
+        step_size = jnp.exp(self.da_state.log_epsilon_bar)
+        samples = self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, self.L)
+
+        return samples
+    
+    def _mcmc_warmup(self,
+               key: jax.random.PRNGKey,
+               group1: jnp.ndarray,
+               warmup: int,
+               da_state: DAState,
+               da_parameters: DAParameters,
+        ):
+        """Run the warmup phase of the Hamiltonian ensemble sampler.
+
+        Args:
+            key (jax.random.PRNGKey): Random number generator key.
+            group1 (jnp.ndarray): Initial ensemble state for group 1 with shape
+                ``(n_chains_per_group, dim)``.
+            group2 (jnp.ndarray): Initial ensemble state for group 2 with shape
+                ``(n_chains_per_group, dim)``.
+            da_state (DAState): Initial dual averaging state.
+                ``(total_chains, dim)``.
+            warmup (int): Number of warmup iterations.
+
+        Returns:
+            tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
+            containing acceptance rates and dual averaging state.
+        """
+        def body(carry, keys):
+            group1, da_state, diagnostics = carry
+
+            step_size = da_state.step_size
+
+            #### Group 1 / Group 2 Update
+            # Update group 1 using group 2 as complement
+            group1_proposed, log_prob_group1 = self.move(group1, 
+                step_size, self.inv_mass_matrix, self.L, 
+                keys[0],
+                self.log_prob, self.grad_log_prob, 
+            )
+
+            #### Accept proposal?
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[2])
+
+            #### Combine diagnostics
+            all_accepts = accept1
+            current_accept_rate = jnp.mean(all_accepts)
+            
+            #### Dual Averaging
+            da_state = da_cond_update(
+                accept_prob=current_accept_rate,
+                parameters=da_parameters,
+                state=da_state,
+            )
+            
+            #### Construct return state
+            new_diagnostics = {
+                'accepts': diagnostics['accepts'] + all_accepts,
+            }
+            
+            return (group1, da_state, new_diagnostics), group1
+        
+        diagnostics = {
+            'accepts': jnp.zeros(self.total_chains),
+        }
+        
+        n_keys = 4
+        keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
+        
+        carry, _ = jax.lax.scan(body, init=(group1, da_state, diagnostics), xs=keys)
+        group1, da_state, diagnostics = carry
+
+        #### Logging
+        diagnostics['acceptance_rate'] = diagnostics['accepts'] / warmup
+
+        self.diagnostics_warmup = diagnostics
+        self.da_state = da_state
+
+        return group1
+
+    def _mcmc_main(self,
+                   key: jax.random.PRNGKey,
+                   group1: jnp.ndarray,
+                   num_samples: int,
+                   thin_by: int,
+                   step_size: float,
+                   inv_mass_matrix: jnp.ndarray,
+                   L: int,
+        ):
+        """Run the main sampling phase of the Hamiltonian ensemble sampler.
+
+        Args:
+            key (jax.random.PRNGKey): Random number generator key.
+            group1 (jnp.ndarray): Ensemble state for group 1 with shape
+                ``(n_chains_per_group, dim)``.
+            num_samples (int): Number of post-warmup samples to retain.
+            thin_by (int): Keep every ``thin_by`` sample.
+            step_size (float): Step size for the leapfrog integrator.
+            inv_mass_matrix (jnp.ndarray): Inverted mass matrix. Shape (dim, dim).
+            L (int): Number of leapfrog steps per proposal.
+
+        Returns:
+            samples (jnp.ndarray): Post-warmup samples with shape
+                ``(num_samples, total_chains, dim)``.
+        """
+
+        ########################################################
+        # Sampling Loop Body
+        ########################################################
+        def body(carry, keys):
+            group1, diagnostics = carry
+
+            #### Group 1 / Group 2 Update
+            # Update group 1 using group 2 as complement
+            group1_proposed, log_prob_group1 = self.move(group1, 
+                step_size, inv_mass_matrix, L,
+                keys[0], 
+                self.log_prob, self.grad_log_prob, 
+            )
+            #### Accept proposal?
+            group1, accepts = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
+
+            #### Diagnostics
+            new_diagnostics = {
+                'accepts': diagnostics['accepts'] + accepts,
+            }
+            
+            #### Construct return state
+            return (group1, new_diagnostics), group1
+        
+        diagnostics = {
+            'accepts': jnp.zeros(self.total_chains),
+        }
+        n_keys_per_iter = 4
+        total_samples = num_samples * thin_by
+        keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
+
+        carry, samples = jax.lax.scan(body, init=(group1, diagnostics), xs=keys)
+        group1, diagnostics = carry
+        
+        # Thinning
+        if thin_by > 1:
+            samples = samples[::thin_by]
+
+        # Logging
+        diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples
+        self.diagnostics_main = diagnostics
+
+        return samples
 
 class HamiltonianEnsembleSampler:
     """Hamiltonian ensemble sampler with optional dual averaging.
@@ -88,7 +382,7 @@ class HamiltonianEnsembleSampler:
             log_epsilon_bar=jnp.array(jnp.log(step_size)),
         )
         self.da_parameters = DAParameters(
-            target_accept=0.8, 
+            target_accept=0.3, 
             t0=10.0, 
             mu=0.05, 
             gamma=0.05, 
