@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from typing import Callable, Optional, Tuple
 
-def hmc(
+def hmc_move(
     group1: jnp.ndarray,
     step_size: float,
     inv_mass_matrix: jnp.ndarray,
