@@ -11,11 +11,11 @@ from typing import Callable, Optional, Sequence, Tuple
 import jax
 import jax.numpy as jnp
 
-from hemcee.moves.hamiltonian.hmc import hmc
+from hemcee.moves.hamiltonian.hmc import hmc_move
 from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
 from hemcee.moves.vanilla.walk import walk_move
 from hemcee.adaptation.dual_averaging import DAState, DAParameters, da_cond_update
-from hemcee.proposal import accept_proposal
+from hemcee.sampler_utils import accept_proposal, calculate_batch_size, batched_scan
 
 class HamiltonianSampler:
     """Hamiltonian sampler with optional dual averaging.
@@ -44,7 +44,7 @@ class HamiltonianSampler:
         step_size: float = 0.2,
         inv_mass_matrix: jnp.ndarray =  None,
         L: int = 10,
-        move = hmc,
+        move = hmc_move,
     ) -> None:
         """Initialise the sampler configuration.
 
@@ -107,6 +107,7 @@ class HamiltonianSampler:
                  num_samples: int,
                  warmup: int = 1000,
                  thin_by=1,
+                 batch_size: Optional[int] = None,
                  adapt_step_size: bool = True,
                  adapt_integration: bool = False,
                  show_progress: bool = False,
@@ -155,14 +156,18 @@ class HamiltonianSampler:
         ########################################################
         print(f"Using {self.total_chains} total chains")
         
+        # Calculate batch sizes
+        warmup_batch_size = calculate_batch_size(self.total_chains, self.dim, warmup, batch_size)
+        main_batch_size = calculate_batch_size(self.total_chains, self.dim, num_samples * thin_by, batch_size)
+        
         # Warmup
         # Contains dual averaging + ChEES updating
-        group1 = self._mcmc_warmup(key, initial_state, warmup, self.da_state, self.da_parameters)
+        group1 = self._mcmc_warmup(key, initial_state, warmup, self.da_state, self.da_parameters, warmup_batch_size)
 
         # Main sampling
         # Statically sets step size & integration length from warmup
         step_size = jnp.exp(self.da_state.log_epsilon_bar)
-        samples = self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, self.L)
+        samples = self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, self.L, main_batch_size)
 
         return samples
     
@@ -172,6 +177,7 @@ class HamiltonianSampler:
                warmup: int,
                da_state: DAState,
                da_parameters: DAParameters,
+               batch_size: int,
         ):
         """Run the warmup phase of the Hamiltonian ensemble sampler.
 
@@ -230,7 +236,7 @@ class HamiltonianSampler:
         n_keys = 4
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
-        carry, _ = jax.lax.scan(body, init=(group1, da_state, diagnostics), xs=keys)
+        carry, _ = batched_scan(body, init_carry=(group1, da_state, diagnostics), xs=keys, batch_size=batch_size)
         group1, da_state, diagnostics = carry
 
         #### Logging
@@ -249,6 +255,7 @@ class HamiltonianSampler:
                    step_size: float,
                    inv_mass_matrix: jnp.ndarray,
                    L: int,
+                   batch_size: int,
         ):
         """Run the main sampling phase of the Hamiltonian ensemble sampler.
 
@@ -298,7 +305,7 @@ class HamiltonianSampler:
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
-        carry, samples = jax.lax.scan(body, init=(group1, diagnostics), xs=keys)
+        carry, samples = batched_scan(body, init_carry=(group1, diagnostics), xs=keys, batch_size=batch_size)
         group1, diagnostics = carry
         
         # Thinning
@@ -395,6 +402,7 @@ class HamiltonianEnsembleSampler:
                  num_samples: int,
                  warmup: int = 1000,
                  thin_by=1,
+                 batch_size: Optional[int] = None,
                  adapt_step_size: bool = True,
                  adapt_integration: bool = False,
                  show_progress: bool = False,
@@ -451,14 +459,18 @@ class HamiltonianEnsembleSampler:
         group1 = initial_state[:group1_size]
         group2 = initial_state[group1_size:]
 
+        # Calculate batch sizes
+        warmup_batch_size = calculate_batch_size(self.total_chains, self.dim, warmup, batch_size)
+        main_batch_size = calculate_batch_size(self.total_chains, self.dim, num_samples * thin_by, batch_size)
+        
         # Warmup
         # Contains dual averaging + ChEES updating
-        group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters)
+        group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters, warmup_batch_size)
 
         # Main sampling
         # Statically sets step size & integration length from warmup
         step_size = jnp.exp(self.da_state.log_epsilon_bar)
-        samples = self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, self.L)
+        samples = self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, self.L, main_batch_size)
 
         return samples
     
@@ -469,6 +481,7 @@ class HamiltonianEnsembleSampler:
                warmup: int,
                da_state: DAState,
                da_parameters: DAParameters,
+               batch_size: int,
         ):
         """Run the warmup phase of the Hamiltonian ensemble sampler.
 
@@ -534,7 +547,7 @@ class HamiltonianEnsembleSampler:
         n_keys = 4
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
-        carry, samples = jax.lax.scan(body, init=(group1, group2, da_state, diagnostics), xs=keys)
+        carry, samples = batched_scan(body, init_carry=(group1, group2, da_state, diagnostics), xs=keys, batch_size=batch_size)
         group1, group2, da_state, diagnostics = carry
 
         #### Logging
@@ -553,6 +566,7 @@ class HamiltonianEnsembleSampler:
                    thin_by: int,
                    step_size: float,
                    L: int,
+                   batch_size: int,
         ):
         """Run the main sampling phase of the Hamiltonian ensemble sampler.
 
@@ -613,7 +627,7 @@ class HamiltonianEnsembleSampler:
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
-        carry, samples = jax.lax.scan(body, init=(group1, group2, diagnostics), xs=keys)
+        carry, samples = batched_scan(body, init_carry=(group1, group2, diagnostics), xs=keys, batch_size=batch_size)
         group1, group2, diagnostics = carry
         
         # Thinning
@@ -660,6 +674,7 @@ class EnsembleSampler:
                num_samples: int,
                warmup: int = 1000,
                thin_by=1,
+               batch_size: Optional[int] = None,
                show_progress: bool = False,
                **kwargs
                ) -> Tuple[jnp.ndarray, dict]:
@@ -696,6 +711,9 @@ class EnsembleSampler:
             raise ValueError("`inital_state` must have shape (total_chains, dim)")
         
         total_samples = warmup + num_samples * thin_by
+
+        # Calculate batch size
+        batch_size = calculate_batch_size(self.total_chains, self.dim, total_samples, batch_size)
 
         # Split chains into two groups
         group1_size = self.total_chains // 2
@@ -738,7 +756,7 @@ class EnsembleSampler:
 
             return (group1, group2, diagnostics), final_states
                 
-        carry, samples = jax.lax.scan(body, init=(group1, group2, diagnostics), xs=keys)
+        carry, samples = batched_scan(body, init_carry=(group1, group2, diagnostics), xs=keys, batch_size=batch_size)
         _, _, diagnostics = carry
 
         # Return post-warmup samples

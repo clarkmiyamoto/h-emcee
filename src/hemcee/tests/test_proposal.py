@@ -12,17 +12,20 @@ import numpy as np
 import pytest
 
 import hemcee
+from hemcee.moves.hamiltonian.hmc import hmc_move
 from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
 from hemcee.moves.hamiltonian.hmc_side import hmc_side_move
 from hemcee.moves.vanilla.side import side_move
 from hemcee.moves.vanilla.walk import walk_move
 from hemcee.moves.vanilla.stretch import stretch_move
 
-hamiltonian_moves = [hmc_walk_move, hmc_side_move]
+hamiltonian_moves = [hmc_move]
+hamiltonian_ensemble_moves = [hmc_walk_move, hmc_side_move]
 vanilla_moves = [walk_move, side_move, stretch_move]
 
 
 @pytest.mark.parametrize("proposal", [
+    hmc_move,
     hmc_walk_move, 
     hmc_side_move, 
     walk_move, 
@@ -32,27 +35,36 @@ vanilla_moves = [walk_move, side_move, stretch_move]
 def test_normal(
     proposal,
     ndim=1,
-    nwalkers=32,
-    nsteps=2000,
-    seed=1234,
+    nwalkers=20,
+    nsteps=3000,
+    seed=0,
 ):
     key = jax.random.PRNGKey(seed)
     keys = jax.random.split(key, 2)
 
     init = jax.random.normal(keys[0], (nwalkers, ndim))
 
+    log_prob = lambda x: - 0.5 * jnp.sum(x**2)
+    
     if proposal in hamiltonian_moves:
+        sampler = hemcee.HamiltonianSampler(
+            total_chains=nwalkers,
+            dim=ndim,
+            log_prob=log_prob,
+            move=proposal,
+        )
+    elif proposal in hamiltonian_ensemble_moves:
         sampler = hemcee.HamiltonianEnsembleSampler(
             total_chains=nwalkers,
             dim=ndim,
-            log_prob=lambda x: - 0.5 * jnp.sum(x**2),
+            log_prob=log_prob,
             move=proposal,
         )
     elif proposal in vanilla_moves:
         sampler = hemcee.EnsembleSampler(
             total_chains=nwalkers,
             dim=ndim,
-            log_prob=lambda x: - 0.5 * jnp.sum(x**2),
+            log_prob=log_prob,
             move=proposal,
         )
     else:
