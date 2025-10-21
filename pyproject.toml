@@ -15,6 +15,7 @@ authors = [
 requires-python = ">=3.9"
 dependencies = [
     "jax>=0.4.20",
+    "tqdm",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -35,13 +36,8 @@ dev = [
     "pytest>=7",
     "pytest-cov",
 
-    # linting & docstrings
-    "flake8>=7",
-    "flake8-docstrings",
-    "pydocstyle>=6",
-    "darglint",
-
     # formatting
+    "pydocstyle",
     "black>=24.0",
 ]
 
