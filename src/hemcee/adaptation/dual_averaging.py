@@ -7,17 +7,59 @@ import jax.lax as lax
 class DAState(NamedTuple):
     """Container for dual averaging state variables."""
     iteration: int
-    step_size: jnp.ndarray
-    H_bar: jnp.ndarray
-    log_epsilon_bar: jnp.ndarray
+    step_size: int
+    H_bar: float
+    log_epsilon_bar: float
 
 class DAParameters(NamedTuple):
-    """Container for dual averaging hyper-parameters."""
+    """
+    Container for dual averaging hyper-parameters.
+    
+    Attributes:
+        target_accept (float): Target acceptance probability.
+        t0 (float): Free parameter that stabilizes initial iterations.
+        mu (float): Log of the initial step size.
+        gamma (float): Controls the speed of adaptation.
+        kappa (float): Controls the shrinkage towards the average.
+    """
     target_accept: float
     t0: float
     mu: float
     gamma: float
     kappa: float
+
+def init_da_state(step_size: float) -> DAState:
+    """Initialize the dual averaging state.
+
+    Args:
+        step_size (float): Initial step size.
+
+    Returns:
+        DAState: Initialized dual averaging state.
+    """
+    return DAState(
+        iteration=0,
+        step_size=step_size,
+        H_bar=0.0,
+        log_epsilon_bar=jnp.log(step_size),
+    )
+
+def init_da_parameters(step_size) -> DAParameters:
+    """Initialize dual averaging parameters with default values.
+
+    Args:
+        step_size (float): Initial step size.
+
+    Returns:
+        DAParameters: Initialized dual averaging parameters.
+    """
+    return DAParameters(
+        target_accept=0.8,
+        t0=10.0,
+        mu=jnp.log(10 * step_size),
+        gamma=0.05,
+        kappa=0.75,
+    )
 
 def da_cond_update(
     accept_prob: float,

@@ -3,7 +3,7 @@
 from typing import Optional, Callable, Any
 import jax
 import jax.numpy as jnp
-
+from tqdm import tqdm
 
 def calculate_batch_size(total_chains: int, dim: int, total_iterations: int, user_batch_size: Optional[int] = None) -> int:
     """Calculate batch size based on problem dimensions or user input.
@@ -24,7 +24,12 @@ def calculate_batch_size(total_chains: int, dim: int, total_iterations: int, use
     return min(heuristic_size, total_iterations)
 
 
-def batched_scan(body_fn: Callable, init_carry: Any, xs: jnp.ndarray, batch_size: int):
+def batched_scan(body_fn: Callable, 
+                 init_carry: Any, 
+                 xs: jnp.ndarray, 
+                 batch_size: int,
+                 storage_device: Optional[jax.Device] = None,
+                 show_progress = False) -> tuple[Any, Any]:
     """Run jax.lax.scan in batches to reduce memory usage.
     
     Args:
@@ -32,22 +37,38 @@ def batched_scan(body_fn: Callable, init_carry: Any, xs: jnp.ndarray, batch_size
         init_carry: Initial carry state.
         xs: Input array to scan over.
         batch_size: Size of each batch.
+        storage_device: Optional device to move outputs to after each batch.
+        show_progress: Whether to display a progress bar.
         
     Returns:
         Tuple[Any, Any]: Final carry state and concatenated outputs.
     """
+    # Determine number of batches
     num_iterations = xs.shape[0]
     num_batches = (num_iterations + batch_size - 1) // batch_size
     
+    # Store outputs from each batch
     all_outputs = []
     carry = init_carry
-    
-    for batch_idx in range(num_batches):
+
+    # Show progress bar? 
+    if show_progress:
+        batch_iter = tqdm(range(num_batches), desc="Batched Scan")
+    else:
+        batch_iter = range(num_batches)
+
+    # Process each batch
+    for batch_idx in batch_iter:
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, num_iterations)
         xs_batch = jax.tree.map(lambda x: x[start_idx:end_idx], xs)
         
         carry, outputs = jax.lax.scan(body_fn, carry, xs_batch)
+        
+        # Move outputs to specified device if provided
+        if storage_device is not None:
+            outputs = jax.device_put(outputs, storage_device)
+
         all_outputs.append(outputs)
     
     # Concatenate all outputs

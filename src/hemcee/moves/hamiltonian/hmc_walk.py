@@ -22,7 +22,7 @@ def hmc_walk_move(
         step_size (float): Leapfrog step size.
         key (jax.random.PRNGKey): Random number generator key.
         log_prob (Callable): Vectorised log-probability function.
-        grad_potential_func_vmap (Callable): Vectorised gradient of the potential function.
+        grad_log_prob (Callable): Vectorised gradient of the potential function.
         L (int): Number of leapfrog steps.
 
     Returns:
@@ -31,9 +31,8 @@ def hmc_walk_move(
     """
     n_chains_per_group = int(group1.shape[0])
 
-    key_momentum, key_accept = jax.random.split(key, 2)
     centered2 = (group2 - jnp.mean(group2, axis=0)[None, :]) / jnp.sqrt(n_chains_per_group) # Shape (n_chains_per_group, dim)
-    momentum = jax.random.normal(key_momentum, shape=(n_chains_per_group, n_chains_per_group))
+    momentum = jax.random.normal(key, shape=(n_chains_per_group, n_chains_per_group))
     
     # Leapfrog Integration
     group1_proposed, momentum_proposed = leapfrog_walk_move(
@@ -80,25 +79,22 @@ def leapfrog_walk_move(
         Tuple[jnp.ndarray, jnp.ndarray]: Updated positions and momenta.
     """
     grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
-    
     p -= 0.5 * beta_eps * jnp.dot(grad, centered.T) # Shape (n_chains_per_group, n_chains_per_group)
     
+    # First L-1 steps with full momentum updates
     def leapfrog_step(step, state):
         q, p = state
         q += beta_eps * jnp.dot(p, centered) # Shape (n_chains_per_group, dim)
-        
-        # Only update momentum if not the last step
-        def update_momentum(p):
-            grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
-            return p - beta_eps * jnp.dot(grad, centered.T)
-        
-        p = jax.lax.cond(step < L - 1, update_momentum, lambda p: p, p)
+        grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+        p -= beta_eps * jnp.dot(grad, centered.T)
         return q, p
     
-    q, p = jax.lax.fori_loop(0, L, leapfrog_step, (q, p))
+    q, p = jax.lax.fori_loop(0, L - 1, leapfrog_step, (q, p))
+    
+    # Last step: only update position, not momentum
+    q += beta_eps * jnp.dot(p, centered)
 
     grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
     p -= 0.5 * beta_eps * jnp.dot(grad, centered.T)
 
     return q, p
-    

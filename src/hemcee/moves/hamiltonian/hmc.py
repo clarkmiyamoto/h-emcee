@@ -66,17 +66,18 @@ def leapfrog(position, momentum, step_size, L, inv_mass_matrix, grad_log_prob):
     q = position
     p = momentum
 
-    p -= 0.5 * step_size * grad_log_prob(q)
+    grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+    p -= 0.5 * step_size * grad
     for _ in range(L):
-        q = q + step_size * (p @ inv_mass_matrix)
+        q += step_size * (p @ inv_mass_matrix)
         if _ != L - 1:
-            p = p - step_size * grad_log_prob(q)
-    p = p - 0.5 * step_size * grad_log_prob(q)
+            grad = -1 * grad_log_prob(q)
+            p -= step_size * grad
+    grad = -1 * grad_log_prob(q)
+    p -= 0.5 * step_size * grad_log_prob(q)
 
     return q, p
 
-import jax
-import jax.numpy as jnp
 from jax.scipy.linalg import solve_triangular
 
 def sample_mvn_from_precision(key, precision, n=1, jitter=1e-8):

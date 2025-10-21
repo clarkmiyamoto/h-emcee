@@ -1,11 +1,6 @@
 """
 High-level sampler implementations for hemcee.
-
-TODO: Prevent the user from making stupid mistakes like wrong graident,
-  remove this entirley, and only allow jax to grad it.
 """
-
-from __future__ import annotations
 
 from typing import Callable, Optional, Sequence, Tuple
 import jax
@@ -14,7 +9,7 @@ import jax.numpy as jnp
 from hemcee.moves.hamiltonian.hmc import hmc_move
 from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
 from hemcee.moves.vanilla.walk import walk_move
-from hemcee.adaptation.dual_averaging import DAState, DAParameters, da_cond_update
+from hemcee.adaptation.dual_averaging import init_da_parameters, init_da_state, da_cond_update, DAParameters, DAState
 from hemcee.sampler_utils import accept_proposal, calculate_batch_size, batched_scan
 
 class HamiltonianSampler:
@@ -45,6 +40,7 @@ class HamiltonianSampler:
         inv_mass_matrix: jnp.ndarray =  None,
         L: int = 10,
         move = hmc_move,
+        storage_device: Optional[jax.Device] = None,
     ) -> None:
         """Initialise the sampler configuration.
 
@@ -54,18 +50,10 @@ class HamiltonianSampler:
             log_prob (Callable): Callable returning the log density of the
                 target distribution (doesn't need to be normalized).
             step_size (float): Leapfrog step size. Defaults to ``0.2``.
+            inv_mass_matrix (jnp.ndarray, optional): Inverted mass matrix. Shape (dim, dim).
             L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
             move (Callable): Proposal function used for ensemble updates.
-            target_accept (float): Target acceptance rate used by dual
-                averaging. Defaults to ``0.8``.
-            t0 (float): Dual averaging stability parameter. Defaults to
-                ``10.0``.
-            mu (float): Dual averaging log step-size offset. Defaults to
-                ``0.05``.
-            gamma (float): Dual averaging shrinkage parameter. Defaults to
-                ``0.05``.
-            kappa (float): Dual averaging adaptation rate. Defaults to
-                ``0.75``.
+            storage_device = Optional[jax.Device]: Optional device to store intermediate results.
         """
         if (total_chains < 4):
             raise ValueError("`total_chains` must be at least 4 to form meaningful ensemble groups")
@@ -87,19 +75,10 @@ class HamiltonianSampler:
 
 
         # Dual Averaging parameters
-        self.da_state = DAState(
-            iteration=0,
-            step_size=step_size, 
-            H_bar=jnp.array(0.0), 
-            log_epsilon_bar=jnp.array(jnp.log(step_size)),
-        )
-        self.da_parameters = DAParameters(
-            target_accept=0.3, 
-            t0=10.0, 
-            mu=0.05, 
-            gamma=0.05, 
-            kappa=0.75,
-        )
+        self.da_state = init_da_state(step_size)
+        self.da_parameters = init_da_parameters(step_size)
+
+        self.storage_device = storage_device
 
     def run_mcmc(self,
                  key: jax.random.PRNGKey,
@@ -136,9 +115,6 @@ class HamiltonianSampler:
         ########################################################
         # Check inputs for sanity
         ########################################################
-        if show_progress:
-            raise NotImplementedError("`show_progress=True` is not supported yet")
-        
         if adapt_integration:
             raise NotImplementedError("`adapt_integration=True` is not supported yet")
         
@@ -162,12 +138,14 @@ class HamiltonianSampler:
         
         # Warmup
         # Contains dual averaging + ChEES updating
-        group1 = self._mcmc_warmup(key, initial_state, warmup, self.da_state, self.da_parameters, warmup_batch_size)
+        group1 = initial_state
+        if warmup > 0:
+            group1 = self._mcmc_warmup(key, group1, warmup, self.da_state, self.da_parameters, warmup_batch_size, show_progress)
 
         # Main sampling
         # Statically sets step size & integration length from warmup
         step_size = jnp.exp(self.da_state.log_epsilon_bar)
-        samples = self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, self.L, main_batch_size)
+        samples = self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, self.L, main_batch_size, show_progress)
 
         return samples
     
@@ -178,6 +156,7 @@ class HamiltonianSampler:
                da_state: DAState,
                da_parameters: DAParameters,
                batch_size: int,
+               show_progress: bool,
         ):
         """Run the warmup phase of the Hamiltonian ensemble sampler.
 
@@ -189,7 +168,9 @@ class HamiltonianSampler:
                 ``(n_chains_per_group, dim)``.
             da_state (DAState): Initial dual averaging state.
                 ``(total_chains, dim)``.
+            da_parameters (DAParameters): Dual averaging parameters.
             warmup (int): Number of warmup iterations.
+            show_progress (bool): Whether to display a progress bar.
 
         Returns:
             tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
@@ -236,7 +217,10 @@ class HamiltonianSampler:
         n_keys = 4
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
-        carry, _ = batched_scan(body, init_carry=(group1, da_state, diagnostics), xs=keys, batch_size=batch_size)
+        carry, _ = batched_scan(body, 
+                                init_carry=(group1, da_state, diagnostics), 
+                                xs=keys, 
+                                batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
         group1, da_state, diagnostics = carry
 
         #### Logging
@@ -256,6 +240,7 @@ class HamiltonianSampler:
                    inv_mass_matrix: jnp.ndarray,
                    L: int,
                    batch_size: int,
+                   show_progress: bool,
         ):
         """Run the main sampling phase of the Hamiltonian ensemble sampler.
 
@@ -305,7 +290,9 @@ class HamiltonianSampler:
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
-        carry, samples = batched_scan(body, init_carry=(group1, diagnostics), xs=keys, batch_size=batch_size)
+        carry, samples = batched_scan(body, 
+                                      init_carry=(group1, diagnostics), 
+                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
         group1, diagnostics = carry
         
         # Thinning
@@ -344,6 +331,7 @@ class HamiltonianEnsembleSampler:
         step_size: float = 0.2,
         L: int = 10,
         move = hmc_walk_move,
+        storage_device: Optional[jax.Device] = None,
     ) -> None:
         """Initialise the sampler configuration.
 
@@ -355,16 +343,7 @@ class HamiltonianEnsembleSampler:
             step_size (float): Leapfrog step size. Defaults to ``0.2``.
             L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
             move (Callable): Proposal function used for ensemble updates.
-            target_accept (float): Target acceptance rate used by dual
-                averaging. Defaults to ``0.8``.
-            t0 (float): Dual averaging stability parameter. Defaults to
-                ``10.0``.
-            mu (float): Dual averaging log step-size offset. Defaults to
-                ``0.05``.
-            gamma (float): Dual averaging shrinkage parameter. Defaults to
-                ``0.05``.
-            kappa (float): Dual averaging adaptation rate. Defaults to
-                ``0.75``.
+            storage_device = Optional[jax.Device]: Optional device to store intermediate results.
         """
         if (total_chains < 4):
             raise ValueError("`total_chains` must be at least 4 to form meaningful ensemble groups")
@@ -382,19 +361,10 @@ class HamiltonianEnsembleSampler:
 
 
         # Dual Averaging parameters
-        self.da_state = DAState(
-            iteration=0,
-            step_size=step_size, 
-            H_bar=jnp.array(0.0), 
-            log_epsilon_bar=jnp.array(jnp.log(step_size)),
-        )
-        self.da_parameters = DAParameters(
-            target_accept=0.3, 
-            t0=10.0, 
-            mu=0.05, 
-            gamma=0.05, 
-            kappa=0.75,
-        )
+        self.da_state = init_da_state(step_size)
+        self.da_parameters = init_da_parameters(step_size)
+
+        self.storage_device = storage_device
 
     def run_mcmc(self,
                  key: jax.random.PRNGKey,
@@ -430,10 +400,7 @@ class HamiltonianEnsembleSampler:
         """
         ########################################################
         # Check inputs for sanity
-        ########################################################
-        if show_progress:
-            raise NotImplementedError("`show_progress=True` is not supported yet")
-        
+        ########################################################        
         if adapt_integration:
             raise NotImplementedError("`adapt_integration=True` is not supported yet")
         
@@ -465,12 +432,13 @@ class HamiltonianEnsembleSampler:
         
         # Warmup
         # Contains dual averaging + ChEES updating
-        group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters, warmup_batch_size)
+        if warmup > 0:
+            group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters, warmup_batch_size, show_progress)
 
         # Main sampling
         # Statically sets step size & integration length from warmup
         step_size = jnp.exp(self.da_state.log_epsilon_bar)
-        samples = self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, self.L, main_batch_size)
+        samples = self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, self.L, main_batch_size, show_progress)
 
         return samples
     
@@ -482,6 +450,7 @@ class HamiltonianEnsembleSampler:
                da_state: DAState,
                da_parameters: DAParameters,
                batch_size: int,
+               show_progress: bool,
         ):
         """Run the warmup phase of the Hamiltonian ensemble sampler.
 
@@ -547,7 +516,9 @@ class HamiltonianEnsembleSampler:
         n_keys = 4
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
-        carry, samples = batched_scan(body, init_carry=(group1, group2, da_state, diagnostics), xs=keys, batch_size=batch_size)
+        carry, samples = batched_scan(body, 
+                                      init_carry=(group1, group2, da_state, diagnostics), 
+                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
         group1, group2, da_state, diagnostics = carry
 
         #### Logging
@@ -567,6 +538,7 @@ class HamiltonianEnsembleSampler:
                    step_size: float,
                    L: int,
                    batch_size: int,
+                   show_progress: bool,
         ):
         """Run the main sampling phase of the Hamiltonian ensemble sampler.
 
@@ -627,7 +599,9 @@ class HamiltonianEnsembleSampler:
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
-        carry, samples = batched_scan(body, init_carry=(group1, group2, diagnostics), xs=keys, batch_size=batch_size)
+        carry, samples = batched_scan(body, 
+                                      init_carry=(group1, group2, diagnostics), 
+                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
         group1, group2, diagnostics = carry
         
         # Thinning
@@ -649,6 +623,7 @@ class EnsembleSampler:
         dim: int,
         log_prob: Callable,
         move = walk_move,
+        storage_device: Optional[jax.Device] = None,
     ) -> None:
         """Initialise the vanilla ensemble sampler.
 
@@ -658,6 +633,7 @@ class EnsembleSampler:
             log_prob (Callable): Callable returning the log density of the
                 target distribution.
             move (Callable): Proposal function used for ensemble updates.
+            storage_device = Optional[jax.Device]: Optional device to store intermediate results.
         """
         self.total_chains = int(total_chains)
         if self.total_chains < 4:
@@ -667,6 +643,8 @@ class EnsembleSampler:
 
         self.log_prob = jax.jit(jax.vmap(log_prob))
         self.move = move
+
+        self.storage_device = storage_device
 
     def run_mcmc(self,
                key: jax.random.PRNGKey,
@@ -695,9 +673,6 @@ class EnsembleSampler:
             tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostic
                 information including acceptance rates.
         """
-        if show_progress:
-            raise NotImplementedError("`show_progress=True` is not supported yet")
-        
         if thin_by < 1:
             raise ValueError("`thinning` must 1 or greater.")
 
@@ -756,7 +731,9 @@ class EnsembleSampler:
 
             return (group1, group2, diagnostics), final_states
                 
-        carry, samples = batched_scan(body, init_carry=(group1, group2, diagnostics), xs=keys, batch_size=batch_size)
+        carry, samples = batched_scan(body, 
+                                      init_carry=(group1, group2, diagnostics), 
+                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
         _, _, diagnostics = carry
 
         # Return post-warmup samples
