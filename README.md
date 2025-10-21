@@ -7,11 +7,14 @@ Implementation of affine invariant Hamiltonian samplers [Y. Chen (2025)](https:/
 # Documentation
 Documentation is available at https://h-emcee.readthedocs.io
 
-# Quick Installation
-It's recommended to make a virtual environment, and install the package using `pip`.
-
+# Installation
+1. Install the appropriate JAX version by following the instructions at https://docs.jax.dev/en/latest/installation.html
+2. Run
 ```bash
-python -m pip install h-emcee
+git clone 
+cd h-emcee
+python -m pip install . -e
 ```
+Installation directly from pip will be release when the package is more stable.
 
 See the documentation for more detailed instructions on installation.
