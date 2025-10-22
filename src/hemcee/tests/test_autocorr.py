@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+'''Unit test for autocorrelation from `emcee` package.'''
 
 import numpy as np
 import pytest
