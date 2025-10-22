@@ -11,7 +11,7 @@ Documentation is available at https://h-emcee.readthedocs.io
 1. Install the appropriate JAX version by following the instructions at https://docs.jax.dev/en/latest/installation.html
 2. Run
 ```bash
-git clone 
+git clone https://github.com/clarkmiyamoto/h-emcee.git
 cd h-emcee
 python -m pip install . -e
 ```
