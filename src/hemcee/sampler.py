@@ -140,7 +140,7 @@ class HamiltonianSampler:
         # Contains dual averaging + ChEES updating
         group1 = initial_state
         if warmup > 0:
-            group1 = self._mcmc_warmup(key, group1, warmup, self.da_state, self.da_parameters, warmup_batch_size, show_progress)
+            group1 = self._mcmc_warmup(key, group1, warmup, self.da_state, self.da_parameters, warmup_batch_size, thin_by, show_progress)
 
         # Main sampling
         # Statically sets step size & integration length from warmup
@@ -156,6 +156,7 @@ class HamiltonianSampler:
                da_state: DAState,
                da_parameters: DAParameters,
                batch_size: int,
+               thin_by: int,
                show_progress: bool,
         ):
         """Run the warmup phase of the Hamiltonian ensemble sampler.
@@ -220,7 +221,9 @@ class HamiltonianSampler:
         carry, _ = batched_scan(body, 
                                 init_carry=(group1, da_state, diagnostics), 
                                 xs=keys, 
-                                batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
+                                batch_size=batch_size, 
+                                thin_by=thin_by,
+                                storage_device=self.storage_device, show_progress=show_progress)
         group1, da_state, diagnostics = carry
 
         #### Logging
@@ -292,12 +295,11 @@ class HamiltonianSampler:
 
         carry, samples = batched_scan(body, 
                                       init_carry=(group1, diagnostics), 
-                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
+                                      xs=keys, 
+                                      batch_size=batch_size,
+                                      thin_by=thin_by, 
+                                      storage_device=self.storage_device, show_progress=show_progress)
         group1, diagnostics = carry
-        
-        # Thinning
-        if thin_by > 1:
-            samples = samples[::thin_by]
 
         # Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples
@@ -433,12 +435,16 @@ class HamiltonianEnsembleSampler:
         # Warmup
         # Contains dual averaging + ChEES updating
         if warmup > 0:
-            group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters, warmup_batch_size, show_progress)
+            print('Starting warmup...')
+            group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters, warmup_batch_size, thin_by, show_progress)
+            print('Warmup complete.')
 
         # Main sampling
         # Statically sets step size & integration length from warmup
         step_size = jnp.exp(self.da_state.log_epsilon_bar)
+        print('Starting main sampling...')
         samples = self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, self.L, main_batch_size, show_progress)
+        print('Main sampling complete.')
 
         return samples
     
@@ -450,6 +456,7 @@ class HamiltonianEnsembleSampler:
                da_state: DAState,
                da_parameters: DAParameters,
                batch_size: int,
+               thin_by: int,
                show_progress: bool,
         ):
         """Run the warmup phase of the Hamiltonian ensemble sampler.
@@ -518,7 +525,10 @@ class HamiltonianEnsembleSampler:
         
         carry, samples = batched_scan(body, 
                                       init_carry=(group1, group2, da_state, diagnostics), 
-                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
+                                      xs=keys, 
+                                      batch_size=batch_size, 
+                                      thin_by=thin_by,
+                                      storage_device=self.storage_device, show_progress=show_progress)
         group1, group2, da_state, diagnostics = carry
 
         #### Logging
@@ -601,12 +611,11 @@ class HamiltonianEnsembleSampler:
 
         carry, samples = batched_scan(body, 
                                       init_carry=(group1, group2, diagnostics), 
-                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
+                                      xs=keys, 
+                                      batch_size=batch_size, 
+                                      thin_by=thin_by,
+                                      storage_device=self.storage_device, show_progress=show_progress)
         group1, group2, diagnostics = carry
-        
-        # Thinning
-        if thin_by > 1:
-            samples = samples[::thin_by]
 
         # Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples
@@ -733,15 +742,15 @@ class EnsembleSampler:
                 
         carry, samples = batched_scan(body, 
                                       init_carry=(group1, group2, diagnostics), 
-                                      xs=keys, batch_size=batch_size, storage_device=self.storage_device, show_progress=show_progress)
+                                      xs=keys, 
+                                      batch_size=batch_size, 
+                                      thin_by=thin_by,
+                                      storage_device=self.storage_device, show_progress=show_progress)
         _, _, diagnostics = carry
 
-        # Return post-warmup samples
-        post_warmup_samples = samples[warmup:] if warmup > 0 else samples
-
-        # Thinning
-        if thin_by > 1:
-            post_warmup_samples = post_warmup_samples[::thin_by]
+        # Return post-warmup samples (already thinned by batched_scan)
+        warmup_thinned = warmup // thin_by if thin_by > 1 else warmup
+        post_warmup_samples = samples[warmup_thinned:] if warmup > 0 else samples
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples

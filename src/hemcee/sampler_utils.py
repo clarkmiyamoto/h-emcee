@@ -28,6 +28,7 @@ def batched_scan(body_fn: Callable,
                  init_carry: Any, 
                  xs: jnp.ndarray, 
                  batch_size: int,
+                 thin_by: int,
                  storage_device: Optional[jax.Device] = None,
                  show_progress = False) -> tuple[Any, Any]:
     """Run jax.lax.scan in batches to reduce memory usage.
@@ -53,7 +54,7 @@ def batched_scan(body_fn: Callable,
 
     # Show progress bar? 
     if show_progress:
-        batch_iter = tqdm(range(num_batches), desc="Batched Scan")
+        batch_iter = tqdm(range(num_batches))
     else:
         batch_iter = range(num_batches)
 
@@ -65,14 +66,18 @@ def batched_scan(body_fn: Callable,
         
         carry, outputs = jax.lax.scan(body_fn, carry, xs_batch)
         
+        outputs_thinned = outputs[::thin_by]
+
+        
         # Move outputs to specified device if provided
         if storage_device is not None:
-            outputs = jax.device_put(outputs, storage_device)
+            outputs_thinned = jax.device_put(outputs_thinned, storage_device)
 
-        all_outputs.append(outputs)
+        all_outputs.append(outputs_thinned)
     
     # Concatenate all outputs
-    combined_outputs = jax.tree.map(lambda *args: jnp.concatenate(args, axis=0), *all_outputs)
+    combined_outputs = jnp.concatenate(all_outputs, axis=0)
+
     return carry, combined_outputs
 
 
