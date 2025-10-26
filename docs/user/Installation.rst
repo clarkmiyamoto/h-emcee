@@ -13,7 +13,12 @@ For a quick start, use :code:`pip` to install:
 
     python -m pip install h-emcee
 
-The backend uses :code:`JAX`, which is installed automatically with :code:`pip`.
+The backend uses :code:`JAX`, which is installed automatically with :code:`pip`. 
+**For GPU users**, this will auto-install a CPU-only version of :code:`JAX`. 
+For an installation with GPU support, please see https://docs.jax.dev/en/latest/installation.html 
+
+For GPU users, install the latest version of :code:`JAX` with GPU support:Installation using :code:`pip`
+------------------------------
 
 Installation from source
 ------------------------

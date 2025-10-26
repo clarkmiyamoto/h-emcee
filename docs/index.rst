@@ -29,6 +29,7 @@ Navigating the documentation
    user/EnsembleSampler
    user/Adaptation
    user/Autocorrelation
+   user/FAQ
 
 
 .. toctree::
@@ -37,6 +38,7 @@ Navigating the documentation
 
    tutorials/quickstart
    tutorials/moves
+   tutorials/adaptation
 
 
 

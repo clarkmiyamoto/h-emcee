@@ -1,5 +1,5 @@
 Autocorrelation
-_______________
+===============
 
 We include a function to compute the integrated autocorrelation time of a time series. 
 This is approximately the number of proposals required to get an independent sample.
