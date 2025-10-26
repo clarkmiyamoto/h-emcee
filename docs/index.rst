@@ -13,9 +13,27 @@ We also include affine-invariant schemes for tuning hyperparameters of HMC sampl
 The philosophy and syntax of this package are meant as a minimal replacement for `emcee <emcee_url>`_.
 This is a pure-Python implementation designed for easy statistical inference (no graphical models needed).
 
-Minimal Example
+Basic Example
 ---------------
+All you need is access to the unnormalized log probability!
 
+.. code-block:: python
+   
+   import jax
+   import jax.numpy as jnp
+   import hemcee
+
+   def log_prob(x):
+      return -0.5 * jnp.sum(x ** 2)
+
+   num_walkers, dim = 100, 5
+   key = jax.random.PRNGKey(0)
+   inital_states = jax.random.normal(key, shape=(num_walkers, dim))
+
+   sampler = hemcee.HamiltonianEnsembleSampler(num_walkers, dim, log_prob)
+   sampler.run_mcmc(inital_states, 10000)
+
+For a more through example, see :doc:`tutorials/quickstart`.
 
 Navigating the documentation
 ----------------------------
