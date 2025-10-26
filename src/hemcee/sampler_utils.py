@@ -1,4 +1,4 @@
-"""Utility functions for MCMC samplers."""
+"""Utility functions for samplers."""
 
 from typing import Optional, Callable, Any
 import jax
@@ -66,15 +66,17 @@ def batched_scan(body_fn: Callable,
         
         carry, outputs = jax.lax.scan(body_fn, carry, xs_batch)
         
-        # Extract coords, log_prob, and accepted from outputs
+        # Extracts data & saves to backend
         coords, log_prob, accepted = outputs
-        
         backend.save_slice(
             coords=coords,
             log_prob=log_prob,
             accepted=jnp.sum(accepted, axis=0),
             index=start_idx
         )
+
+        # Clear memory
+        del outputs, coords, log_prob, accepted
     
     # Concatenate all samples
     

@@ -16,10 +16,8 @@ class HDFBackend(Backend):
         backend.
 
     Args:
-        filename (str): The name of the HDF5 file where the chain will be
-            saved.
-        name (str): The name of the group where the chain will
-            be saved.
+        filename (str): The name of the HDF5 file where the chain will be saved.
+        name (str): The name of the group where the chain will be saved.
         read_only (bool): If ``True``, the backend will throw a
             ``RuntimeError`` if the file is opened with write access.
         dtype (jax.numpy.dtype): JAX NumPy data type. Defaults to JAX's default of float32, or data type of read in data.

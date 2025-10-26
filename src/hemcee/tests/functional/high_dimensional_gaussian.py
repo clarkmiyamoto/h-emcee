@@ -11,7 +11,7 @@ import corner
 seed = 0
 
 # Distribution Settings
-dim = 100
+dim = 12
 condition_number = 1000
 
 # Sampler Settings
