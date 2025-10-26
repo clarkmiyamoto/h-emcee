@@ -39,6 +39,9 @@ dev = [
     # formatting
     "pydocstyle",
     "black>=24.0",
+
+    # backend
+    "h5py",
 ]
 
 # --- Tell setuptools about src/ layout ---
