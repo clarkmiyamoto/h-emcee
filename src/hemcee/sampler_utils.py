@@ -5,6 +5,8 @@ import jax
 import jax.numpy as jnp
 from tqdm import tqdm
 
+from hemcee.backend.backend import Backend
+
 def calculate_batch_size(total_chains: int, dim: int, total_iterations: int, user_batch_size: Optional[int] = None) -> int:
     """Calculate batch size based on problem dimensions or user input.
     
@@ -28,8 +30,7 @@ def batched_scan(body_fn: Callable,
                  init_carry: Any, 
                  xs: jnp.ndarray, 
                  batch_size: int,
-                 thin_by: int,
-                 storage_device: Optional[jax.Device] = None,
+                 backend: Backend,
                  show_progress = False) -> tuple[Any, Any]:
     """Run jax.lax.scan in batches to reduce memory usage.
     
@@ -38,18 +39,17 @@ def batched_scan(body_fn: Callable,
         init_carry: Initial carry state.
         xs: Input array to scan over.
         batch_size: Size of each batch.
-        storage_device: Optional device to move outputs to after each batch.
+        backend: Backend for storing intermediate results.
         show_progress: Whether to display a progress bar.
         
     Returns:
-        Tuple[Any, Any]: Final carry state and concatenated outputs.
+        Tuple[Any, Any]: Final carry state and backend.
     """
     # Determine number of batches
     num_iterations = xs.shape[0]
     num_batches = (num_iterations + batch_size - 1) // batch_size
     
     # Store outputs from each batch
-    all_outputs = []
     carry = init_carry
 
     # Show progress bar? 
@@ -62,23 +62,23 @@ def batched_scan(body_fn: Callable,
     for batch_idx in batch_iter:
         start_idx = batch_idx * batch_size
         end_idx = min(start_idx + batch_size, num_iterations)
-        xs_batch = jax.tree.map(lambda x: x[start_idx:end_idx], xs)
+        xs_batch = xs[start_idx:end_idx]
         
         carry, outputs = jax.lax.scan(body_fn, carry, xs_batch)
         
-        outputs_thinned = outputs[::thin_by]
-
+        # Extract coords, log_prob, and accepted from outputs
+        coords, log_prob, accepted = outputs
         
-        # Move outputs to specified device if provided
-        if storage_device is not None:
-            outputs_thinned = jax.device_put(outputs_thinned, storage_device)
-
-        all_outputs.append(outputs_thinned)
+        backend.save_slice(
+            coords=coords,
+            log_prob=log_prob,
+            accepted=jnp.sum(accepted, axis=0),
+            index=start_idx
+        )
     
-    # Concatenate all outputs
-    combined_outputs = jnp.concatenate(all_outputs, axis=0)
-
-    return carry, combined_outputs
+    # Concatenate all samples
+    
+    return carry
 
 
 def accept_proposal(

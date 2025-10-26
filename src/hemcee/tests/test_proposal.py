@@ -37,7 +37,9 @@ def test_normal(
     ndim=1,
     nwalkers=20,
     nsteps=3000,
-    seed=0,
+    warmup=0,
+    thin_by=1,
+    seed=1,
 ):
     key = jax.random.PRNGKey(seed)
     keys = jax.random.split(key, 2)
@@ -70,18 +72,19 @@ def test_normal(
     else:
         raise ValueError(f"Invalid proposal: {proposal}")
 
-    samples = sampler.run_mcmc(keys[1], init, nsteps)
+    samples = sampler.run_mcmc(keys[1], init, nsteps, warmup=warmup, thin_by=thin_by)
+    assert samples.shape == (nsteps,nwalkers,ndim), "Samples were fomatted incorrectly by `run_mcmc`"
+
     samples = samples.reshape(-1, ndim)
 
-    # samples = np.array(samples).reshape(-1, ndim)
-
-    mu, sig = np.mean(samples, axis=0), np.std(samples, axis=0)
-
+    # Compute sufficient statistics
+    mu = np.mean(samples, axis=0), 
     assert np.all(np.abs(mu) < 0.08), "Incorrect mean"
+    
+    sig = np.std(samples, axis=0)
     assert np.all(np.abs(sig - 1) < 0.05), "Incorrect standard deviation"
 
     ks_stat, _ = kstest(samples.reshape(-1), 'norm')
-    
     assert ks_stat < 0.05, "The K-S test failed"
 
     
