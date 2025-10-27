@@ -7,7 +7,7 @@ class Adapter(ABC):
     """Abstract base class for adaptation algorithms."""
     
     @abstractmethod
-    def init(self, initial_value: float, dim: int):
+    def init(self, dim: int):
         """Initialize adapter state with initial hyperparameter value and dimensionality."""
         pass
     

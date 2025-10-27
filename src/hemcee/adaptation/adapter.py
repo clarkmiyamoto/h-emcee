@@ -18,9 +18,9 @@ class NoOpAdapter(Adapter):
         self.constant_step_size = initial_step_size
         self.constant_integration_time = initial_L
     
-    def init(self, initial_value: float, dim: int) -> NoOpState:
+    def init(self, dim: int) -> NoOpState:
         """Initialize with the provided constant values."""
-        return NoOpState(constant_step_size=initial_value, constant_integration_time=self.constant_integration_time)
+        return NoOpState(constant_step_size=self.constant_step_size, constant_integration_time=self.constant_integration_time)
     
     def update(self, state: NoOpState, accept_rate: float, positions: jnp.ndarray) -> NoOpState:
         """No-op: return state unchanged."""
@@ -49,10 +49,10 @@ class CompositeAdapter(Adapter):
         self.da_adapter = DualAveragingAdapter(da_parameters, initial_step_size, initial_L)
         self.chees_adapter = ChEESAdapter(chees_parameters, initial_step_size, initial_L)
     
-    def init(self, initial_value: float, dim: int) -> CompositeState:
+    def init(self, dim: int) -> CompositeState:
         """Initialize both adapters."""
-        da_state = self.da_adapter.init(initial_value, dim)
-        chees_state = self.chees_adapter.init(initial_value, dim)
+        da_state = self.da_adapter.init(dim)
+        chees_state = self.chees_adapter.init(dim)
         return CompositeState(da_state=da_state, chees_state=chees_state)
     
     def update(self, state: CompositeState, accept_rate: float, positions: jnp.ndarray) -> CompositeState:

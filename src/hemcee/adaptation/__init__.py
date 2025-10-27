@@ -1,5 +1,4 @@
-from .chees import ChEESAdapter
-from .dual_averaging import DualAveragingAdapter
-from .adapter import NoOpAdapter, CompositeAdapter
+from .chees import ChEESParameters
+from .dual_averaging import DAParameters
 
-__all__ = ["ChEESAdapter", "DualAveragingAdapter", "NoOpAdapter", "CompositeAdapter"]
+__all__ = ["ChEESParameters", "DAParameters"]

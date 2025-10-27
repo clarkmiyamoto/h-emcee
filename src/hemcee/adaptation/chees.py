@@ -18,7 +18,6 @@ class ChEESParameters(NamedTuple):
     Parameters for the ChEES adaptation.
     
     Args:
-        T_init: Initial guess for the integration time.
         T_min: Minimum allowed integration time.
         T_max: Maximum allowed integration time.
         lr_T: Learning rate for the integration time.
@@ -26,7 +25,6 @@ class ChEESParameters(NamedTuple):
         jitter: Jitter for the integration time.
         metric: Use O(n) invariant metric, or affine invariant metric. Choices ('euclidean', 'mahalanobis')
     """
-    T_init: float = 1.0
     T_min: float = 0.25
     T_max: float = 10.0
     lr_T: float = 5e-3
@@ -41,6 +39,7 @@ class ChEESAdapter(Adapter):
     def __init__(self, parameters: ChEESParameters, initial_step_size: float, initial_L: float):
         self.parameters = parameters
         self.passthrough_step_size = initial_step_size
+        self.inital_L = initial_L
 
         if parameters.metric == 'euclidean':
             self.chess_grad = chees_grad_T_euclidean
@@ -49,12 +48,12 @@ class ChEESAdapter(Adapter):
         else:
             raise ValueError('Metric for ChEES tuner is not suppported. Choose between ["euclidean", "mahalanobis"]')
     
-    def init(self, initial_value: float, dim: int) -> ChEESState:
+    def init(self, dim: int) -> ChEESState:
         """Initialize ChEES state."""
         return ChEESState(
             q=jnp.zeros(dim),
             mu=jnp.zeros(dim),
-            T=self.parameters.T_init
+            T=self.inital_L
         )
     
     def update(self, state: ChEESState, accept_rate: float, positions: jnp.ndarray) -> ChEESState:

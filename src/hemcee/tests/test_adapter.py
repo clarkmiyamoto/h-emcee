@@ -27,29 +27,28 @@ def test_default_adaptation_both_enabled():
     sampler_Default = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob)
     samples_fromDefault = sampler_Default.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5)
 
-    sampler_BothEnabled = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob)
-    samples_fromBothEnabled = sampler_BothEnabled.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5, 
-                                                           adapt_step_size=True , adapt_length=True)
+    sampler_BothEnabled = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob, adapt_step_size=True , adapt_length=True)
+    samples_fromBothEnabled = sampler_BothEnabled.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5,)
 
     assert isinstance(sampler_Default.adapter, CompositeAdapter), "Default adapter should be CompositeAdapter"
     assert isinstance(sampler_BothEnabled.adapter, CompositeAdapter), "Both enabled adapter should be CompositeAdapter"
     assert jnp.allclose(samples_fromDefault, samples_fromBothEnabled), "Outputs were not the same"
 
 def test_stepsize_adaptation_disabled():
-    sampler = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob)
-    sampler.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5, adapt_step_size=False , adapt_length=True)
+    sampler = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob, adapt_step_size=False , adapt_length=True)
+    sampler.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5,)
 
     assert isinstance(sampler.adapter, ChEESAdapter), 'Adapter is not `ChEESAdapter`'
 
 def test_chees_adaptation_disable():
-    sampler = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob)
-    sampler.run_mcmc(keys[1], inital_state,  num_samples=1, warmup=5, adapt_step_size=True , adapt_length=False, )
+    sampler = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob, adapt_step_size=True , adapt_length=False,)
+    sampler.run_mcmc(keys[1], inital_state,  num_samples=1, warmup=5,)
 
     assert isinstance(sampler.adapter, DualAveragingAdapter), 'Adapter is not `DualAveragingAdapter`'
 
 def test_no_adaptation():
-    sampler = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob)
-    sampler.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5, adapt_step_size=False, adapt_length=False)
+    sampler = hemcee.HamiltonianEnsembleSampler(n_walkers, n_dim, log_prob, adapt_step_size=False, adapt_length=False)
+    sampler.run_mcmc(keys[1], inital_state, num_samples=1, warmup=5,)
 
     assert isinstance(sampler.adapter, NoOpAdapter), 'Adapter is not `NoOpAdapter`'
 

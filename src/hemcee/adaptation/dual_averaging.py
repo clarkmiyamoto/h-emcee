@@ -25,7 +25,6 @@ class DAParameters(NamedTuple):
     """
     target_accept: float = 0.8
     t0: float = 10.0
-    mu: float = jnp.log(10 * 0.1)
     gamma: float = 0.05
     kappa: float = 0.75
 
@@ -35,15 +34,16 @@ class DualAveragingAdapter(Adapter):
     
     def __init__(self, parameters: DAParameters, initial_step_size: float, initial_L: float):
         self.parameters = parameters
+        self.initial_step_size = initial_step_size
         self.passthrough_L = initial_L
     
-    def init(self, initial_value: float, dim: int) -> DAState:
+    def init(self, dim: int) -> DAState:
         """Initialize dual averaging state."""
         return DAState(
             iteration=0,
-            step_size=initial_value,
+            step_size=self.initial_step_size,
             H_bar=0.0,
-            log_epsilon_bar=jnp.log(initial_value),
+            log_epsilon_bar=jnp.log(self.initial_step_size),
         )
     
     def update(self, state: DAState, accept_rate: float, positions: jnp.ndarray) -> DAState:
@@ -55,7 +55,7 @@ class DualAveragingAdapter(Adapter):
             (1.0 - 1.0 / (it + 1 + self.parameters.t0)) * state.H_bar
             + (self.parameters.target_accept - accept_rate) / (it + 1 + self.parameters.t0)
         )
-        log_eps = self.parameters.mu - (jnp.sqrt(it + 1.0) / self.parameters.gamma) * H_bar_new
+        log_eps = self.initial_step_size - (jnp.sqrt(it + 1.0) / self.parameters.gamma) * H_bar_new
         eta = (it + 1.0) ** (-self.parameters.kappa)
         log_eps_bar_new = eta * log_eps + (1.0 - eta) * state.log_epsilon_bar
         step_size_new = jnp.exp(log_eps)

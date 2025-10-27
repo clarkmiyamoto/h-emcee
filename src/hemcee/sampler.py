@@ -126,6 +126,8 @@ class HamiltonianSampler(BaseSampler):
         L: int = 10,
         move = hmc_move,
         backend: Backend = None,
+        adapt_step_size: bool | DAParameters = True,
+        adapt_length: bool | ChEESParameters = True,
     ) -> None:
         """Initialise the sampler configuration.
 
@@ -139,6 +141,10 @@ class HamiltonianSampler(BaseSampler):
             L (int): Number of leapfrog steps per proposal. Defaults to ``10``.
             move (Callable): Proposal function used for ensemble updates.
             backend: Backend for storing chain data.
+            adapt_step_size (bool | DAParameters): Adapt step size of leapfrog integrator using Dual Averaging scheme.
+                Defaults to yes, will adapt.
+            adapt_length (bool | ChEESParameters): Adapt integration length of leapfrog integrator using ChEES scheme.
+                Defaults to yes, will adapt.
         """
         # Initialize base class
         super().__init__(total_chains, dim, log_prob, move, backend)
@@ -149,8 +155,8 @@ class HamiltonianSampler(BaseSampler):
         self.inv_mass_matrix = jnp.eye(dim) if inv_mass_matrix is None else inv_mass_matrix
 
         # Dual Averaging / ChEES Adapter
-        self.adapter = None
-        self.adapter_state = None
+        self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
+        self.adapter_state = self.adapter.init(self.dim)
 
     def run_mcmc(self,
                  key: jax.random.PRNGKey,
@@ -159,8 +165,6 @@ class HamiltonianSampler(BaseSampler):
                  warmup: int = 1000,
                  thin_by=1,
                  batch_size: Optional[int] = None,
-                 adapt_step_size: bool | DAParameters = True,
-                 adapt_length: bool | ChEESParameters = True,
                  show_progress: bool = False,
                  ) -> Tuple[jnp.ndarray, dict]:
         """Run the Hamiltonian sampler.
@@ -203,8 +207,6 @@ class HamiltonianSampler(BaseSampler):
         group1 = initial_state
         if warmup > 0:
             print('Starting warmup...')
-            self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
-            self.adapter_state = self.adapter.init(self.step_size, self.dim)
             group1 = self._mcmc_warmup(key, group1, warmup, 
                                        self.adapter, warmup_batch_size, thin_by, 
                                        show_progress)
@@ -402,6 +404,8 @@ class HamiltonianEnsembleSampler(BaseSampler):
         L: int = 10,
         move = hmc_walk_move,
         backend: Backend = None,
+        adapt_step_size: bool | DAParameters = True,
+        adapt_length: bool | ChEESParameters = True,
     ) -> None:
         """Initialise the sampler configuration.
 
@@ -423,8 +427,8 @@ class HamiltonianEnsembleSampler(BaseSampler):
         self.L = L
 
         # Dual Averaging / ChEES Adapter
-        self.adapter = None
-        self.adapter_state = None
+        self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
+        self.adapter_state = self.adapter.init(self.dim)
 
     def run_mcmc(self,
                  key: jax.random.PRNGKey,
@@ -433,8 +437,6 @@ class HamiltonianEnsembleSampler(BaseSampler):
                  warmup: int = 1000,
                  thin_by=1,
                  batch_size: Optional[int] = None,
-                 adapt_step_size: bool | DAParameters = True,
-                 adapt_length: bool | ChEESParameters = True,
                  show_progress: bool = False,
                  ) -> Tuple[jnp.ndarray, dict]:
         """Run the Hamiltonian ensemble sampler.
@@ -447,10 +449,6 @@ class HamiltonianEnsembleSampler(BaseSampler):
             warmup (int): Number of warmup iterations. Defaults to ``1000``.
             thin_by (int): Keep every ``thin_by``
                 sample. Defaults to ``1`` (no thinning).
-            adapt_step_size (bool): Whether to adapt the step size via dual
-                averaging. Defaults to ``True``.
-            adapt_integration (bool): Whether to adapt integration settings
-                using affine-invariant NUTS. Defaults to ``False``.
             show_progress (bool): Whether to display a progress bar. Defaults
                 to ``False``.
 
@@ -484,8 +482,6 @@ class HamiltonianEnsembleSampler(BaseSampler):
         # Contains dual averaging + ChEES updating
         if warmup > 0:
             print('Starting warmup...')
-            self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
-            self.adapter_state = self.adapter.init(self.step_size, self.dim)
             group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, 
                                                self.adapter, warmup_batch_size, thin_by, 
                                                show_progress)
