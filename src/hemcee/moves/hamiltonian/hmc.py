@@ -66,15 +66,24 @@ def leapfrog(position, momentum, step_size, L, inv_mass_matrix, grad_log_prob):
     q = position
     p = momentum
 
-    grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
+    grad = -grad_log_prob(q)
     p -= 0.5 * step_size * grad
-    for _ in range(L):
+
+    def body(i, carry):
+        q, p = carry
         q += step_size * (p @ inv_mass_matrix)
-        if _ != L - 1:
-            grad = -1 * grad_log_prob(q)
-            p -= step_size * grad
-    grad = -1 * grad_log_prob(q)
-    p -= 0.5 * step_size * grad_log_prob(q)
+        grad = -grad_log_prob(q)
+        p -=  step_size * grad
+        return (q, p)
+
+    q, p = jax.lax.fori_loop(0, L-1, body, (q, p))
+
+    # apply the final position update (the "q get applied one more time")
+    q += step_size * (p @ inv_mass_matrix)
+
+    # final half-step momentum update using grad at final q
+    grad = -grad_log_prob(q)
+    p -= 0.5 * step_size * grad
 
     return q, p
 
