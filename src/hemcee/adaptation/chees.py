@@ -73,13 +73,15 @@ class ChEESAdapter(Adapter):
         
         return ChEESState(q=jnp.mean(positions, axis=0), mu=mu_new, T=T_new)
     
-    def value(self, state: ChEESState) -> tuple[float, float]:
-        """Get current integration time. Returns (unchanged_step_size, integration_time)."""
-        return (self.passthrough_step_size, state.T)
+    def value(self, state: ChEESState) -> tuple[float, int]:
+        """Get current integration length. Returns (unchanged_step_size, integration_length)."""
+        integration_length = jnp.array(state.T/self.passthrough_step_size, dtype=jnp.int32)
+        return (self.passthrough_step_size, integration_length)
     
-    def finalize(self, state: ChEESState) -> tuple[float, float]:
-        """Get final integration time. Returns (unchanged_step_size, integration_time)."""
-        return (self.passthrough_step_size, state.T)
+    def finalize(self, state: ChEESState) -> tuple[float, int]:
+        """Get final integration length. Returns (unchanged_step_size, integration_length)."""
+        integration_length = jnp.array(state.T/self.passthrough_step_size, dtype=jnp.int32)
+        return (self.passthrough_step_size, integration_length)
 
 def welford_ema_mean(mu: jnp.ndarray, x: jnp.ndarray, momentum: float) -> jnp.ndarray:
    """Exponential moving average of mean across batch dimension 0.

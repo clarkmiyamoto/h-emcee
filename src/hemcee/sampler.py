@@ -271,7 +271,6 @@ class HamiltonianSampler(BaseSampler):
             
             # Extract current adapted values
             step_size_new, L_new = adapter.value(adapter_state_new)
-            L_new = jnp.array(L_new, dtype=jnp.int32)  # Convert to integer for fori_loop
             
             #### Construct return state
             new_diagnostics = {
@@ -558,7 +557,6 @@ class HamiltonianEnsembleSampler(BaseSampler):
             
             # Extract current adapted values
             step_size_new, L_new = adapter.value(adapter_state_new)
-            L_new = jnp.array(L_new, dtype=jnp.int32)  # Convert to integer for fori_loop
             
             #### Construct return state
             new_diagnostics = {

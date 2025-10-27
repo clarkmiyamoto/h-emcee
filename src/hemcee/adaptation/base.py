@@ -1,3 +1,9 @@
+'''
+I've developed the adapters to mirror BlackJAX's 
+(https://github.com/blackjax-devs/blackjax) adapters...
+Obviously this is very scuffed, but I don't have a good alternative.
+I'm very open to collaboration here!
+'''
 from abc import ABC, abstractmethod
 from typing import NamedTuple
 import jax.numpy as jnp
