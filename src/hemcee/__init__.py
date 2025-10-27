@@ -1,8 +1,8 @@
 """h-emcee: affine-invariant Hamiltonian samplers in JAX."""
 
-from .sampler import HamiltonianSampler
-from .sampler import HamiltonianEnsembleSampler
-from .sampler import EnsembleSampler
+from .samplers.hamiltonian import HamiltonianSampler
+from .samplers.hamiltonian_ensemble import HamiltonianEnsembleSampler
+from .samplers.ensemble import EnsembleSampler
 from . import autocorr
 
 __version__ = '0.0.1'

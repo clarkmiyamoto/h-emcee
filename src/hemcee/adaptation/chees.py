@@ -75,12 +75,14 @@ class ChEESAdapter(Adapter):
     
     def value(self, state: ChEESState) -> tuple[float, int]:
         """Get current integration length. Returns (unchanged_step_size, integration_length)."""
-        integration_length = jnp.array(state.T/self.passthrough_step_size, dtype=jnp.int32)
+        integration_length = state.T/self.passthrough_step_size
+        integration_length = jnp.astype(integration_length, int)
         return (self.passthrough_step_size, integration_length)
     
     def finalize(self, state: ChEESState) -> tuple[float, int]:
         """Get final integration length. Returns (unchanged_step_size, integration_length)."""
-        integration_length = jnp.array(state.T/self.passthrough_step_size, dtype=jnp.int32)
+        integration_length = jnp.round(state.T/self.passthrough_step_size)
+        integration_length = jnp.astype(integration_length, int)
         return (self.passthrough_step_size, integration_length)
 
 def welford_ema_mean(mu: jnp.ndarray, x: jnp.ndarray, momentum: float) -> jnp.ndarray:

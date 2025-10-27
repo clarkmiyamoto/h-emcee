@@ -64,8 +64,8 @@ class DualAveragingAdapter(Adapter):
     
     def value(self, state: DAState) -> tuple[float, float]:
         """Get current step size during warmup. Returns (step_size, unchanged_integration_time)."""
-        return (state.step_size, 10.0)  # Default integration time, unchanged
+        return (state.step_size, self.passthrough_L)  # Default integration time, unchanged
     
     def finalize(self, state: DAState) -> tuple[float, float]:
         """Get final step size from dual average. Returns (step_size, unchanged_integration_time)."""
-        return (jnp.exp(state.log_epsilon_bar), 10.0)  # Default integration time, unchanged
+        return (jnp.exp(state.log_epsilon_bar), self.passthrough_L)  # Default integration time, unchanged
