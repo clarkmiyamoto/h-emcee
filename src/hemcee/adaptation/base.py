@@ -1,0 +1,27 @@
+from abc import ABC, abstractmethod
+from typing import NamedTuple
+import jax.numpy as jnp
+
+
+class Adapter(ABC):
+    """Abstract base class for adaptation algorithms."""
+    
+    @abstractmethod
+    def init(self, initial_value: float, dim: int):
+        """Initialize adapter state with initial hyperparameter value and dimensionality."""
+        pass
+    
+    @abstractmethod
+    def update(self, state, accept_rate: float, positions: jnp.ndarray):
+        """Update state given acceptance rate and current positions."""
+        pass
+    
+    @abstractmethod
+    def value(self, state) -> tuple[float, float]:
+        """Extract current adapted values during warmup. Returns (step_size, integration_time)."""
+        pass
+    
+    @abstractmethod
+    def finalize(self, state) -> tuple[float, float]:
+        """Return final adapted values after warmup. Returns (step_size, integration_time)."""
+        pass

@@ -10,7 +10,9 @@ import jax.numpy as jnp
 from hemcee.moves.hamiltonian.hmc import hmc_move
 from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
 from hemcee.moves.vanilla.walk import walk_move
-from hemcee.adaptation.dual_averaging import init_da_parameters, init_da_state, da_cond_update, DAParameters, DAState
+from hemcee.adaptation.adapter import select_adapter, Adapter
+from hemcee.adaptation.chees import ChEESParameters
+from hemcee.adaptation.dual_averaging import DAParameters
 from hemcee.backend.backend import Backend
 from hemcee.sampler_utils import accept_proposal, calculate_batch_size, batched_scan
 
@@ -86,9 +88,6 @@ class BaseSampler(ABC):
         if initial_state.shape != (self.total_chains, self.dim):
             raise ValueError('`inital_state` needs to have shape ')
 
-
-        
-
     def get_chain(self, 
                   discard: int = 0, 
                   thin: int = 1, 
@@ -102,7 +101,7 @@ class BaseSampler(ABC):
         return self.backend.get_log_prob(discard=discard, thin=thin, flat=flat)
 
 class HamiltonianSampler(BaseSampler):
-    """Hamiltonian sampler with optional dual averaging.
+    """Hamiltonian sampler with optional dual averaging and ChEES adaptation.
 
     Attributes:
         total_chains (int): Total number of ensemble chains.
@@ -113,8 +112,8 @@ class HamiltonianSampler(BaseSampler):
         inv_mass_matrix (jnp.ndarray): Inverted mass matrix. Shape (dim, dim).
         L (int): Number of leapfrog steps per move.
         move (Callable): Proposal function updating each ensemble group.
-        da_state (DAState): Dual averaging state.
-        da_parameters (DAParameters): Dual averaging parameters.
+        adapter (Adapter): Adapter for step size and integration time adaptation.
+        adapter_state: Current state of the adapter.
     """
 
     def __init__(
@@ -148,10 +147,10 @@ class HamiltonianSampler(BaseSampler):
         self.step_size = step_size
         self.L = L
         self.inv_mass_matrix = jnp.eye(dim) if inv_mass_matrix is None else inv_mass_matrix
-            
-        # Dual Averaging parameters
-        self.da_state = init_da_state(step_size)
-        self.da_parameters = init_da_parameters(step_size)
+
+        # Dual Averaging / ChEES Adapter
+        self.adapter = None
+        self.adapter_state = None
 
     def run_mcmc(self,
                  key: jax.random.PRNGKey,
@@ -160,11 +159,11 @@ class HamiltonianSampler(BaseSampler):
                  warmup: int = 1000,
                  thin_by=1,
                  batch_size: Optional[int] = None,
-                 adapt_step_size: bool = True,
-                 adapt_integration: bool = False,
+                 adapt_step_size: bool | DAParameters = True,
+                 adapt_length: bool | ChEESParameters = True,
                  show_progress: bool = False,
                  ) -> Tuple[jnp.ndarray, dict]:
-        """Run the Hamiltonian ensemble sampler.
+        """Run the Hamiltonian sampler.
 
         Args:
             key (jax.random.PRNGKey): Random number generator key.
@@ -174,24 +173,20 @@ class HamiltonianSampler(BaseSampler):
             warmup (int): Number of warmup iterations. Defaults to ``1000``.
             thin_by (int): Keep every ``thin_by``
                 sample. Defaults to ``1`` (no thinning).
-            adapt_step_size (bool): Whether to adapt the step size via dual
+            adapt_step_size (bool | DAParameters): Whether to adapt the step size via dual
                 averaging. Defaults to ``True``.
-            adapt_integration (bool): Whether to adapt integration settings
-                using affine-invariant NUTS. Defaults to ``False``.
+            adapt_length (bool | ChEESParameters): Whether to adapt integration settings
+                using ChEES. Defaults to ``True``.
             show_progress (bool): Whether to display a progress bar. Defaults
                 to ``False``.
 
         Returns:
             tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
-            containing acceptance rates and dual averaging state.
+            containing acceptance rates and adapter state.
         """
         ########################################################
         # Check inputs for sanity
-        ########################################################
-        if adapt_integration:
-            raise NotImplementedError("`adapt_integration=True` is not supported yet")
-        
-        # Use base class validation
+        ########################################################                
         self._validate_mcmc_inputs(warmup, num_samples, thin_by, initial_state)
         
         ########################################################
@@ -207,12 +202,26 @@ class HamiltonianSampler(BaseSampler):
         # Contains dual averaging + ChEES updating
         group1 = initial_state
         if warmup > 0:
-            group1 = self._mcmc_warmup(key, group1, warmup, self.da_state, self.da_parameters, warmup_batch_size, thin_by, show_progress)
+            print('Starting warmup...')
+            self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
+            self.adapter_state = self.adapter.init(self.step_size, self.dim)
+            group1 = self._mcmc_warmup(key, group1, warmup, 
+                                       self.adapter, warmup_batch_size, thin_by, 
+                                       show_progress)
+            print('Warmup complete.')
 
         # Main sampling
         # Statically sets step size & integration length from warmup
-        step_size = jnp.exp(self.da_state.log_epsilon_bar)
-        self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, self.L, main_batch_size, show_progress)
+        print('Starting main sampling...')
+        if warmup > 0:
+            # Extract final adapted values
+            step_size, L = self.adapter.finalize(self.adapter_state)
+            L = jnp.array(L, dtype=jnp.int32)  # Convert to integer for fori_loop
+        else:
+            step_size = self.step_size
+            L = self.L
+        self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, L, main_batch_size, show_progress)
+        print('Main sampling complete.')
 
         return self.get_chain(discard=warmup, thin=thin_by)
 
@@ -220,56 +229,47 @@ class HamiltonianSampler(BaseSampler):
                key: jax.random.PRNGKey,
                group1: jnp.ndarray,
                warmup: int,
-               da_state: DAState,
-               da_parameters: DAParameters,
+               adapter: Adapter,
                batch_size: int,
                thin_by: int,
                show_progress: bool,
         ):
-        """Run the warmup phase of the Hamiltonian ensemble sampler.
+        """Run the warmup phase of the Hamiltonian sampler.
 
         Args:
             key (jax.random.PRNGKey): Random number generator key.
-            group1 (jnp.ndarray): Initial ensemble state for group 1 with shape
-                ``(n_chains_per_group, dim)``.
-            group2 (jnp.ndarray): Initial ensemble state for group 2 with shape
-                ``(n_chains_per_group, dim)``.
-            da_state (DAState): Initial dual averaging state.
+            group1 (jnp.ndarray): Initial ensemble state with shape
                 ``(total_chains, dim)``.
-            da_parameters (DAParameters): Dual averaging parameters.
+            adapter (Adapter): Adapter for step size and integration time adaptation.
             warmup (int): Number of warmup iterations.
-            show_progress (bool): Whether to display a progress bar.
 
         Returns:
-            tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
-            containing acceptance rates and dual averaging state.
+            jnp.ndarray: Post-warmup ensemble state.
         """
         def body(carry, keys):
-            group1, da_state, diagnostics = carry
+            group1, step_size, L, adapter_state, diagnostics = carry
 
-            step_size = da_state.step_size
-
-            #### Group 1 / Group 2 Update
-            # Update group 1 using group 2 as complement
+            #### Group 1 Update
+            # Update group 1 using HMC move
             group1_proposed, log_prob_group1 = self.move(group1, 
-                step_size, self.inv_mass_matrix, self.L, 
+                step_size, self.inv_mass_matrix, L, 
                 keys[0],
                 self.log_prob, self.grad_log_prob, 
             )
 
             #### Accept proposal?
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[2])
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[1])
 
             #### Combine diagnostics
             all_accepts = accept1
             current_accept_rate = jnp.mean(all_accepts)
             
-            #### Dual Averaging
-            da_state = da_cond_update(
-                accept_prob=current_accept_rate,
-                parameters=da_parameters,
-                state=da_state,
-            )
+            #### Adaptation
+            adapter_state_new = adapter.update(adapter_state, current_accept_rate, group1)
+            
+            # Extract current adapted values
+            step_size_new, L_new = adapter.value(adapter_state_new)
+            L_new = jnp.array(L_new, dtype=jnp.int32)  # Convert to integer for fori_loop
             
             #### Construct return state
             new_diagnostics = {
@@ -279,28 +279,28 @@ class HamiltonianSampler(BaseSampler):
             # Compute log probabilities for current state
             log_prob_group1 = self.log_prob(group1)
             
-            return (group1, da_state, new_diagnostics), (group1, log_prob_group1, accept1)
+            return (group1, step_size_new, L_new, adapter_state_new, new_diagnostics), (group1, log_prob_group1, accept1)
         
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
         }
         
-        n_keys = 4
+        n_keys = 2
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
         carry = batched_scan(body, 
-                                init_carry=(group1, da_state, diagnostics), 
-                                xs=keys, 
-                                batch_size=batch_size, 
-                                backend=self.backend,
-                                show_progress=show_progress)
-        group1, da_state, diagnostics = carry
+                             init_carry=(group1, self.step_size, self.L, self.adapter_state, diagnostics), 
+                             xs=keys, 
+                             batch_size=batch_size, 
+                             backend=self.backend,
+                             show_progress=show_progress)
+        group1, step_size_final, L_final, adapter_state_final, diagnostics = carry
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / warmup
 
         self.diagnostics_warmup = diagnostics
-        self.da_state = da_state
+        self.adapter_state = adapter_state_final
 
         return group1
 
@@ -315,12 +315,12 @@ class HamiltonianSampler(BaseSampler):
                    batch_size: int,
                    show_progress: bool,
         ):
-        """Run the main sampling phase of the Hamiltonian ensemble sampler.
+        """Run the main sampling phase of the Hamiltonian sampler.
 
         Args:
             key (jax.random.PRNGKey): Random number generator key.
-            group1 (jnp.ndarray): Ensemble state for group 1 with shape
-                ``(n_chains_per_group, dim)``.
+            group1 (jnp.ndarray): Ensemble state with shape
+                ``(total_chains, dim)``.
             num_samples (int): Number of post-warmup samples to retain.
             thin_by (int): Keep every ``thin_by`` sample.
             step_size (float): Step size for the leapfrog integrator.
@@ -338,15 +338,15 @@ class HamiltonianSampler(BaseSampler):
         def body(carry, keys):
             group1, diagnostics = carry
 
-            #### Group 1 / Group 2 Update
-            # Update group 1 using group 2 as complement
+            #### Group 1 Update
+            # Update group 1 using HMC move
             group1_proposed, log_prob_group1 = self.move(group1, 
                 step_size, inv_mass_matrix, L,
                 keys[0], 
                 self.log_prob, self.grad_log_prob, 
             )
             #### Accept proposal?
-            group1, accepts = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
+            group1, accepts = accept_proposal(group1, group1_proposed, log_prob_group1, keys[1])
 
             #### Diagnostics
             new_diagnostics = {
@@ -362,7 +362,7 @@ class HamiltonianSampler(BaseSampler):
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
         }
-        n_keys_per_iter = 4
+        n_keys_per_iter = 2
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
@@ -379,7 +379,7 @@ class HamiltonianSampler(BaseSampler):
         self.diagnostics_main = diagnostics
 
 class HamiltonianEnsembleSampler(BaseSampler):
-    """Hamiltonian ensemble sampler with optional dual averaging.
+    """Hamiltonian ensemble sampler with optional dual averaging and ChEES adaptation.
 
     Attributes:
         total_chains (int): Total number of ensemble chains.
@@ -389,8 +389,8 @@ class HamiltonianEnsembleSampler(BaseSampler):
         step_size (float): Leapfrog step size.
         L (int): Number of leapfrog steps per move.
         move (Callable): Proposal function updating each ensemble group.
-        da_state (DAState): Dual averaging state.
-        da_parameters (DAParameters): Dual averaging parameters.
+        adapter (Adapter): Adapter for step size and integration time adaptation.
+        adapter_state: Current state of the adapter.
     """
 
     def __init__(
@@ -422,9 +422,9 @@ class HamiltonianEnsembleSampler(BaseSampler):
         self.step_size = step_size
         self.L = L
 
-        # Dual Averaging parameters
-        self.da_state = init_da_state(step_size)
-        self.da_parameters = init_da_parameters(step_size)
+        # Dual Averaging / ChEES Adapter
+        self.adapter = None
+        self.adapter_state = None
 
     def run_mcmc(self,
                  key: jax.random.PRNGKey,
@@ -433,8 +433,8 @@ class HamiltonianEnsembleSampler(BaseSampler):
                  warmup: int = 1000,
                  thin_by=1,
                  batch_size: Optional[int] = None,
-                 adapt_step_size: bool = True,
-                 adapt_integration: bool = False,
+                 adapt_step_size: bool | DAParameters = True,
+                 adapt_length: bool | ChEESParameters = True,
                  show_progress: bool = False,
                  ) -> Tuple[jnp.ndarray, dict]:
         """Run the Hamiltonian ensemble sampler.
@@ -460,11 +460,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
         """
         ########################################################
         # Check inputs for sanity
-        ########################################################        
-        if adapt_integration:
-            raise NotImplementedError("`adapt_integration=True` is not supported yet")
-        
-        # Use base class validation
+        ########################################################                
         self._validate_mcmc_inputs(warmup, num_samples, thin_by, initial_state)
         
         ########################################################
@@ -488,14 +484,24 @@ class HamiltonianEnsembleSampler(BaseSampler):
         # Contains dual averaging + ChEES updating
         if warmup > 0:
             print('Starting warmup...')
-            group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, self.da_state, self.da_parameters, warmup_batch_size, thin_by, show_progress)
+            self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
+            self.adapter_state = self.adapter.init(self.step_size, self.dim)
+            group1, group2 = self._mcmc_warmup(key, group1, group2, warmup, 
+                                               self.adapter, warmup_batch_size, thin_by, 
+                                               show_progress)
             print('Warmup complete.')
 
         # Main sampling
         # Statically sets step size & integration length from warmup
         print('Starting main sampling...')
-        step_size = jnp.exp(self.da_state.log_epsilon_bar)
-        self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, self.L, main_batch_size, show_progress)
+        if warmup > 0:
+            # Extract final adapted values
+            step_size, L = self.adapter.finalize(self.adapter_state)
+            L = jnp.array(L, dtype=jnp.int32)  # Convert to integer for fori_loop
+        else:
+            step_size = self.step_size
+            L = self.L
+        self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, L, main_batch_size, show_progress)
         print('Main sampling complete.')
 
         return self.get_chain(discard=warmup, thin=thin_by)
@@ -505,8 +511,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
                group1: jnp.ndarray,
                group2: jnp.ndarray,
                warmup: int,
-               da_state: DAState,
-               da_parameters: DAParameters,
+               adapter: Adapter,
                batch_size: int,
                thin_by: int,
                show_progress: bool,
@@ -519,18 +524,15 @@ class HamiltonianEnsembleSampler(BaseSampler):
                 ``(n_chains_per_group, dim)``.
             group2 (jnp.ndarray): Initial ensemble state for group 2 with shape
                 ``(n_chains_per_group, dim)``.
-            da_state (DAState): Initial dual averaging state.
-                ``(total_chains, dim)``.
+            adapter (Adapter): Adapter for step size and integration time adaptation.
             warmup (int): Number of warmup iterations.
 
         Returns:
             tuple[jnp.ndarray, dict]: Post-warmup samples and diagnostics
-            containing acceptance rates and dual averaging state.
+            containing acceptance rates and adapter state.
         """
         def body(carry, keys):
-            group1, group2, da_state, diagnostics = carry
-
-            step_size = da_state.step_size
+            group1, group2, step_size, L, adapter_state, diagnostics = carry
 
             #### Group 1 / Group 2 Update
             # Update group 1 using group 2 as complement
@@ -552,22 +554,22 @@ class HamiltonianEnsembleSampler(BaseSampler):
             #### Combine diagnostics
             all_accepts = jnp.concatenate([accept1, accept2])
             current_accept_rate = jnp.mean(all_accepts)
-            
-            #### Dual Averaging
-            da_state = da_cond_update(
-                accept_prob=current_accept_rate,
-                parameters=da_parameters,
-                state=da_state,
-            )
-            
-            #### Construct return state
             final_states = jnp.concatenate([group1, group2])
             final_log_probs = jnp.concatenate([log_prob_group1, log_prob_group2])
+            
+            #### Adaptation
+            adapter_state_new = adapter.update(adapter_state, current_accept_rate, final_states)
+            
+            # Extract current adapted values
+            step_size_new, L_new = adapter.value(adapter_state_new)
+            L_new = jnp.array(L_new, dtype=jnp.int32)  # Convert to integer for fori_loop
+            
+            #### Construct return state
             new_diagnostics = {
                 'accepts': diagnostics['accepts'] + all_accepts,
             }
             
-            return (group1, group2, da_state, new_diagnostics), (final_states, final_log_probs, all_accepts)
+            return (group1, group2, step_size_new, L_new, adapter_state_new, new_diagnostics), (final_states, final_log_probs, all_accepts)
         
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
@@ -577,18 +579,18 @@ class HamiltonianEnsembleSampler(BaseSampler):
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
         carry = batched_scan(body, 
-                             init_carry=(group1, group2, da_state, diagnostics), 
+                             init_carry=(group1, group2, self.step_size, self.L, self.adapter_state, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 
                              backend=self.backend,
                              show_progress=show_progress)
-        group1, group2, da_state, diagnostics = carry
+        group1, group2, step_size_final, L_final, adapter_state_final, diagnostics = carry
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / warmup
 
         self.diagnostics_warmup = diagnostics
-        self.da_state = da_state
+        self.adapter_state = adapter_state_final
 
         return group1, group2
 
