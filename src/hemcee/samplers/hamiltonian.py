@@ -30,7 +30,7 @@ class HamiltonianSampler(BaseSampler):
         total_chains: int,
         dim: int,
         log_prob: Callable,
-        step_size: float = 0.2,
+        step_size: float = 0.1,
         inv_mass_matrix: jnp.ndarray = None,
         L: int = 10,
         move = hmc_move,
@@ -59,12 +59,10 @@ class HamiltonianSampler(BaseSampler):
         super().__init__(total_chains, dim, log_prob, move, backend)
         
         # Hamiltonian-specific parameters
-        self.step_size = step_size
-        self.L = L
         self.inv_mass_matrix = jnp.eye(dim) if inv_mass_matrix is None else inv_mass_matrix
 
         # Dual Averaging / ChEES Adapter
-        self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
+        self.adapter = select_adapter(adapt_step_size, adapt_length, self.move, step_size, L)
         self.adapter_state = self.adapter.init(self.dim)
 
     def run_mcmc(self,
@@ -123,13 +121,9 @@ class HamiltonianSampler(BaseSampler):
 
         # Main sampling
         # Statically sets step size & integration length from warmup
+        step_size, L = self.adapter.finalize(self.adapter_state)
+
         print('Starting main sampling...')
-        if warmup > 0:
-            # Extract final adapted values
-            step_size, L = self.adapter.finalize(self.adapter_state)
-        else:
-            step_size = self.step_size
-            L = self.L
         self._mcmc_main(key, group1, num_samples, thin_by, step_size, self.inv_mass_matrix, L, main_batch_size, show_progress)
         print('Main sampling complete.')
 
@@ -157,38 +151,44 @@ class HamiltonianSampler(BaseSampler):
             jnp.ndarray: Post-warmup ensemble state.
         """
         def body(carry, keys):
-            group1, step_size, L, adapter_state, diagnostics = carry
+            group1, adapter_state, diagnostics = carry
 
             #### Group 1 Update
             # Update group 1 using HMC move
-            group1_proposed, log_prob_group1 = self.move(group1, 
-                step_size, self.inv_mass_matrix, L, 
+            step_size, L = adapter.value(adapter_state)
+            group1_proposed, log_accept_prob, momentum_proposed, proposed_log_prob = self.move(
+                group1, 
+                step_size, 
+                self.inv_mass_matrix, 
+                L, 
                 keys[0],
-                self.log_prob, self.grad_log_prob, 
+                self.log_prob, 
+                self.grad_log_prob, 
             )
 
             #### Accept proposal?
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[1])
-
-            #### Combine diagnostics
-            all_accepts = accept1
-            current_accept_rate = jnp.mean(all_accepts)
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob, keys[1])
             
             #### Adaptation
-            adapter_state_new = adapter.update(adapter_state, current_accept_rate, group1)
-            
-            # Extract current adapted values
+            adapter_state_new = adapter.update(
+                state=adapter_state, 
+                log_accept_rate=log_accept_prob, 
+                position_current=group1,
+                position_proposed=group1_proposed,
+                momentum_proposed=momentum_proposed,
+                group2=None,
+                integration_time_jittered=step_size * L)
             step_size_new, L_new = adapter.value(adapter_state_new)
             
             #### Construct return state
             new_diagnostics = {
-                'accepts': diagnostics['accepts'] + all_accepts,
+                'accepts': diagnostics['accepts'] + accept1,
             }
             
             # Compute log probabilities for current state
             log_prob_group1 = self.log_prob(group1)
             
-            return (group1, step_size_new, L_new, adapter_state_new, new_diagnostics), (group1, log_prob_group1, accept1)
+            return (group1, adapter_state_new, new_diagnostics), (group1, log_prob_group1, accept1)
         
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
@@ -197,13 +197,13 @@ class HamiltonianSampler(BaseSampler):
         n_keys = 2
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
-        carry = batched_scan(body, 
-                             init_carry=(group1, self.step_size, self.L, self.adapter_state, diagnostics), 
+        carry, self.backend = batched_scan(body, 
+                             init_carry=(group1, self.adapter_state, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 
                              backend=self.backend,
                              show_progress=show_progress)
-        group1, step_size_final, L_final, adapter_state_final, diagnostics = carry
+        group1, adapter_state_final, diagnostics = carry
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / warmup
@@ -249,13 +249,13 @@ class HamiltonianSampler(BaseSampler):
 
             #### Group 1 Update
             # Update group 1 using HMC move
-            group1_proposed, log_prob_group1 = self.move(group1, 
+            group1_proposed, log_accept_prob, _, proposed_log_prob = self.move(group1, 
                 step_size, inv_mass_matrix, L,
                 keys[0], 
                 self.log_prob, self.grad_log_prob, 
             )
             #### Accept proposal?
-            group1, accepts = accept_proposal(group1, group1_proposed, log_prob_group1, keys[1])
+            group1, accepts = accept_proposal(group1, group1_proposed, log_accept_prob, keys[1])
 
             #### Diagnostics
             new_diagnostics = {
@@ -275,7 +275,7 @@ class HamiltonianSampler(BaseSampler):
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
-        carry = batched_scan(body, 
+        carry, self.backend = batched_scan(body, 
                              init_carry=(group1, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size,

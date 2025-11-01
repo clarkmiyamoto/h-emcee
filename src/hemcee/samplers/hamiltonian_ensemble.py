@@ -29,7 +29,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
         total_chains: int,
         dim: int,
         log_prob: Callable,
-        step_size: float = 0.2,
+        step_size: float = 0.1,
         L: int = 10,
         move = hmc_walk_move,
         backend: Backend = None,
@@ -56,7 +56,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
         self.L = L
 
         # Dual Averaging / ChEES Adapter
-        self.adapter = select_adapter(adapt_step_size, adapt_length, self.step_size, self.L)
+        self.adapter = select_adapter(adapt_step_size, adapt_length, self.move, self.step_size, self.L)
         self.adapter_state = self.adapter.init(self.dim)
 
     def run_mcmc(self,
@@ -125,7 +125,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
         else:
             step_size = self.step_size
             L = self.L
-        self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, L, main_batch_size, show_progress)
+        self._mcmc_main(key, group1, group2, num_samples, thin_by, step_size, L, main_batch_size, show_progress, warmup_offset=warmup)
         print('Main sampling complete.')
 
         return self.get_chain(discard=warmup, thin=thin_by)
@@ -155,43 +155,55 @@ class HamiltonianEnsembleSampler(BaseSampler):
             containing acceptance rates and adapter state.
         """
         def body(carry, keys):
-            group1, group2, step_size, L, adapter_state, diagnostics = carry
+            group1, group2, adapter_state, diagnostics = carry
 
             #### Group 1 / Group 2 Update
-            # Update group 1 using group 2 as complement
-            group1_proposed, log_prob_group1 = self.move(group1, group2, 
+            step_size, L = adapter.value(adapter_state)
+            group1_proposed, log_accept_prob_1, momentum_projected_1, proposed_log_prob_1 = self.move(group1, group2, 
                 step_size, keys[0],
                 self.log_prob, self.grad_log_prob, 
-                self.L
+                L
             )
-            # Update group 2 using group 1 as complement  
-            group2_proposed, log_prob_group2 = self.move(group2, group1, 
+            adapter_state_after_group1 = adapter.update(
+                state=adapter_state, 
+                log_accept_rate=log_accept_prob_1, 
+                position_current = group1,
+                position_proposed = group1_proposed,
+                momentum_proposed = momentum_projected_1,
+                group2=group2,
+                integration_time_jittered = step_size * L)
+            
+            # Update group 2 using group 1 as complement
+            step_size, L = adapter.value(adapter_state_after_group1)  
+            group2_proposed, log_accept_prob_2, momentum_projected_2, proposed_log_prob_2 = self.move(group2, group1, 
                 step_size, keys[1],
                 self.log_prob, self.grad_log_prob, 
-                self.L
+                L
             )
+            adapter_state_after_group2 = adapter.update(
+                state=adapter_state_after_group1, 
+                log_accept_rate=log_accept_prob_2, 
+                position_current = group2,
+                position_proposed = group2_proposed,
+                momentum_proposed = momentum_projected_2,
+                group2=group1,
+                integration_time_jittered = step_size * L)
+            
             #### Accept proposal?
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[2])
-            group2, accept2 = accept_proposal(group2, group2_proposed, log_prob_group2, keys[3])
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob_1, keys[2])
+            group2, accept2 = accept_proposal(group2, group2_proposed, log_accept_prob_2, keys[3])
 
             #### Combine diagnostics
             all_accepts = jnp.concatenate([accept1, accept2])
-            current_accept_rate = jnp.mean(all_accepts)
             final_states = jnp.concatenate([group1, group2])
-            final_log_probs = jnp.concatenate([log_prob_group1, log_prob_group2])
-            
-            #### Adaptation
-            adapter_state_new = adapter.update(adapter_state, current_accept_rate, final_states)
-            
-            # Extract current adapted values
-            step_size_new, L_new = adapter.value(adapter_state_new)
             
             #### Construct return state
             new_diagnostics = {
                 'accepts': diagnostics['accepts'] + all_accepts,
             }
+            final_log_probs = self.log_prob(final_states)
             
-            return (group1, group2, step_size_new, L_new, adapter_state_new, new_diagnostics), (final_states, final_log_probs, all_accepts)
+            return (group1, group2, adapter_state_after_group2, new_diagnostics), (final_states, final_log_probs, all_accepts)
         
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
@@ -200,19 +212,23 @@ class HamiltonianEnsembleSampler(BaseSampler):
         n_keys = 4
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
-        carry = batched_scan(body, 
-                             init_carry=(group1, group2, self.step_size, self.L, self.adapter_state, diagnostics), 
+        carry, self.backend = batched_scan(body, 
+                             init_carry=(group1, group2, self.adapter_state, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 
                              backend=self.backend,
-                             show_progress=show_progress)
-        group1, group2, step_size_final, L_final, adapter_state_final, diagnostics = carry
+                             show_progress=show_progress,
+                             offset=0)
+        group1, group2, adapter_state_final, diagnostics = carry
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / warmup
 
         self.diagnostics_warmup = diagnostics
         self.adapter_state = adapter_state_final
+        
+        # Mark end of warmup phase
+        self.backend.mark_warmup_end()
 
         return group1, group2
 
@@ -226,6 +242,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
                    L: int,
                    batch_size: int,
                    show_progress: bool,
+                   warmup_offset: int = 0,
         ):
         """Run the main sampling phase of the Hamiltonian ensemble sampler.
 
@@ -239,6 +256,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
             thin_by (int): Keep every ``thin_by`` sample.
             step_size (float): Step size for the leapfrog integrator.
             L (int): Number of leapfrog steps per proposal.
+            warmup_offset (int): Number of warmup iterations (for backend indexing).
 
         Returns:
             samples (jnp.ndarray): Post-warmup samples with shape
@@ -253,20 +271,20 @@ class HamiltonianEnsembleSampler(BaseSampler):
 
             #### Group 1 / Group 2 Update
             # Update group 1 using group 2 as complement
-            group1_proposed, log_prob_group1 = self.move(group1, group2, 
+            group1_proposed, log_accept_prob_1, momentum_projected_1, proposed_log_prob_1 = self.move(group1, group2, 
                 step_size, keys[0],
                 self.log_prob, self.grad_log_prob, 
                 L
             )
             # Update group 2 using group 1 as complement  
-            group2_proposed, log_prob_group2 = self.move(group2, group1, 
+            group2_proposed, log_accept_prob_2, momentum_projected_2, proposed_log_prob_2 = self.move(group2, group1, 
                 step_size, keys[1],
                 self.log_prob, self.grad_log_prob, 
                 L
             )
             #### Accept proposal?
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
-            group2, accept2 = accept_proposal(group2, group2_proposed, log_prob_group2, keys[1])
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob_1, keys[2])
+            group2, accept2 = accept_proposal(group2, group2_proposed, log_accept_prob_2, keys[3])
 
             #### Diagnostics
             all_accepts = jnp.concatenate([accept1, accept2])
@@ -276,7 +294,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
             
             #### Construct return state
             final_states = jnp.concatenate([group1, group2])
-            final_log_probs = jnp.concatenate([log_prob_group1, log_prob_group2])
+            final_log_probs = self.log_prob(final_states)
             
             return (group1, group2, new_diagnostics), (final_states, final_log_probs, all_accepts)
         
@@ -287,12 +305,13 @@ class HamiltonianEnsembleSampler(BaseSampler):
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
-        carry = batched_scan(body, 
+        carry, self.backend = batched_scan(body, 
                              init_carry=(group1, group2, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 
                              backend=self.backend,
-                             show_progress=show_progress)
+                             show_progress=show_progress,
+                             offset=warmup_offset)
         group1, group2, diagnostics = carry
 
         # Logging

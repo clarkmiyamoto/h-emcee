@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Callable
 import jax.numpy as jnp
 from .base import Adapter
 from .dual_averaging import DAParameters, DAState, DualAveragingAdapter
@@ -22,7 +22,7 @@ class NoOpAdapter(Adapter):
         """Initialize with the provided constant values."""
         return NoOpState(constant_step_size=self.constant_step_size, constant_integration_time=self.constant_integration_time)
     
-    def update(self, state: NoOpState, accept_rate: float, positions: jnp.ndarray) -> NoOpState:
+    def update(self, state: NoOpState, **kwargs) -> NoOpState:
         """No-op: return state unchanged."""
         return state
     
@@ -44,10 +44,10 @@ class CompositeState(NamedTuple):
 class CompositeAdapter(Adapter):
     """Composite adapter that combines DA + ChEES."""
     
-    def __init__(self, da_parameters: DAParameters, chees_parameters: ChEESParameters, 
+    def __init__(self, da_parameters: DAParameters, chees_parameters: ChEESParameters, move_type: str,
                  initial_step_size: float, initial_L: float):
         self.da_adapter = DualAveragingAdapter(da_parameters, initial_step_size, initial_L)
-        self.chees_adapter = ChEESAdapter(chees_parameters, initial_step_size, initial_L)
+        self.chees_adapter = ChEESAdapter(chees_parameters, move_type, initial_step_size, initial_L)
     
     def init(self, dim: int) -> CompositeState:
         """Initialize both adapters."""
@@ -55,27 +55,32 @@ class CompositeAdapter(Adapter):
         chees_state = self.chees_adapter.init(dim)
         return CompositeState(da_state=da_state, chees_state=chees_state)
     
-    def update(self, state: CompositeState, accept_rate: float, positions: jnp.ndarray) -> CompositeState:
+    def update(self, state: CompositeState, **kwargs) -> CompositeState:
         """Update both adapters."""
-        da_state_new = self.da_adapter.update(state.da_state, accept_rate, positions)
-        chees_state_new = self.chees_adapter.update(state.chees_state, accept_rate, positions)
+        da_state_new = self.da_adapter.update(state.da_state, log_accept_rate=kwargs['log_accept_rate'])
+        chees_state_new = self.chees_adapter.update(state.chees_state, **kwargs)
         return CompositeState(da_state=da_state_new, chees_state=chees_state_new)
     
     def value(self, state: CompositeState) -> tuple[float, float]:
         """Return (step_size, integration_time) tuple."""
         step_size, _ = self.da_adapter.value(state.da_state)
-        _, integration_time = self.chees_adapter.value(state.chees_state)
-        return (step_size, integration_time)
+        T = self.chees_adapter._get_T(state.chees_state)
+        integration_length = jnp.maximum(jnp.round(T/step_size), 1)
+        integration_length = jnp.astype(integration_length, int)
+        return (step_size, integration_length)
     
     def finalize(self, state: CompositeState) -> tuple[float, float]:
         """Return final (step_size, integration_time) tuple."""
         step_size, _ = self.da_adapter.finalize(state.da_state)
-        _, integration_time = self.chees_adapter.finalize(state.chees_state)
-        return (step_size, integration_time)
+        T = self.chees_adapter._get_T(state.chees_state)
+        integration_length = jnp.maximum(jnp.round(T/step_size), 1)
+        integration_length = jnp.astype(integration_length, int)
+        return (step_size, integration_length)
 
 
 def select_adapter(da_parameters: bool | DAParameters,
                    chees_parameters: bool | ChEESParameters,
+                   move: Callable,
                    initial_step_size: float,
                    initial_L: float) -> Adapter:
     """Select appropriate adapter based on parameter configuration.
@@ -83,6 +88,7 @@ def select_adapter(da_parameters: bool | DAParameters,
     Args:
         da_parameters: True for default DA, False to disable, or custom DAParameters
         chees_parameters: True for default ChEES, False to disable, or custom ChEESParameters
+        move: Callable move function to use for ChEES adapter.
         initial_step_size: Initial step size value to use for pass-through
         initial_L: Initial integration time value to use for pass-through
         
@@ -92,6 +98,10 @@ def select_adapter(da_parameters: bool | DAParameters,
     Raises:
         ValueError: If both adapters are disabled
     """
+    move_type = getattr(move, '__name__', None)
+    if move_type not in ['hmc_move', 'hmc_walk_move', 'hmc_side_move']:
+        raise ValueError(f'Move type for ChEES tuner is not suppported. Choose between ["hmc_move", "hmc_walk_move", "hmc_side_move"]. Got {move_type}')
+
     # Convert True to default parameters
     if da_parameters is True:
         da_parameters = DAParameters()  # Default step size
@@ -110,6 +120,6 @@ def select_adapter(da_parameters: bool | DAParameters,
     if da_enabled and not chees_enabled:
         return DualAveragingAdapter(da_parameters, initial_step_size, initial_L)
     elif not da_enabled and chees_enabled:
-        return ChEESAdapter(chees_parameters, initial_step_size, initial_L)
+        return ChEESAdapter(chees_parameters, move_type, initial_step_size, initial_L)
     else:  # Both enabled
-        return CompositeAdapter(da_parameters, chees_parameters, initial_step_size, initial_L)
+        return CompositeAdapter(da_parameters, chees_parameters, move_type, initial_step_size, initial_L)

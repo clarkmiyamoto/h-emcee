@@ -101,6 +101,9 @@ class HDFBackend(Backend):
             g.attrs["nwalkers"] = nwalkers
             g.attrs["ndim"] = ndim
             g.attrs["iteration"] = 0
+            g.attrs["iteration_warmup"] = 0
+            g.attrs["iteration_main"] = 0
+            g.attrs["warmup_end_index"] = -1  # -1 means warmup not yet complete
             g.create_dataset(
                 "chain",
                 (0, nwalkers, ndim),
@@ -169,6 +172,16 @@ class HDFBackend(Backend):
     def iteration(self):
         with self.open() as f:
             return f[self.name].attrs["iteration"]
+    
+    @property
+    def iteration_warmup(self):
+        with self.open() as f:
+            return f[self.name].attrs["iteration_warmup"]
+    
+    @property
+    def iteration_main(self):
+        with self.open() as f:
+            return f[self.name].attrs["iteration_main"]
 
     @property
     def accepted(self):
@@ -186,11 +199,10 @@ class HDFBackend(Backend):
             coords (jnp.ndarray): Coordinates array of shape (nsteps, nwalkers, ndim)
             log_prob (jnp.ndarray): Log probability array of shape (nsteps, nwalkers)
             accepted (jnp.ndarray): Accepted array of shape (nwalkers,)
-            index (int): Starting index for the slice
+            index (int): Starting index for this slice in the full chain
         """
         with self.open("a") as f:
             g = f[self.name]
-            current_iteration = g.attrs["iteration"]
             
             # Get current dimensions
             nsteps, nwalkers, ndim = coords.shape
@@ -206,10 +218,27 @@ class HDFBackend(Backend):
             # Write the data to storage
             g["chain"][index:index+nsteps] = coords
             g["log_prob"][index:index+nsteps] = log_prob
-            g["accepted"] += accepted
+            g["accepted"][:] = g["accepted"][:] + accepted
             
             # Update iteration counter
-            g.attrs["iteration"] =index + nsteps 
+            g.attrs["iteration"] = index + nsteps
+            
+            # Update warmup/main counters based on warmup_end_index
+            warmup_end_idx = g.attrs["warmup_end_index"]
+            if warmup_end_idx < 0:
+                # Warmup not completed yet, count everything as warmup
+                g.attrs["iteration_warmup"] = g.attrs["iteration"]
+                g.attrs["iteration_main"] = 0
+            else:
+                # Warmup has been marked as complete
+                g.attrs["iteration_warmup"] = min(g.attrs["iteration"], warmup_end_idx)
+                g.attrs["iteration_main"] = max(0, g.attrs["iteration"] - warmup_end_idx)
+    
+    def mark_warmup_end(self):
+        """Mark the current iteration as the end of warmup phase."""
+        with self.open("a") as f:
+            g = f[self.name]
+            g.attrs["warmup_end_index"] = g.attrs["iteration"]
 
 if __name__ == '__main__':
     nwalkers = 128

@@ -109,7 +109,7 @@ class EnsembleSampler(BaseSampler):
 
             return (group1, group2, diagnostics), (final_states, final_log_probs, all_accepts)
                 
-        carry = batched_scan(body, 
+        carry, self.backend = batched_scan(body, 
                              init_carry=(group1, group2, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 

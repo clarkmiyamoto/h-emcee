@@ -22,7 +22,8 @@ def make_distributions(
         key = jax.random.PRNGKey(seed)
         distributions.append(make_gaussian_skewed(key, dim=dim, cond_number=1))
         distributions.append(make_gaussian_skewed(key, dim=dim, cond_number=100))
-        distributions.append(make_gaussian_cov_wishart(key, dim=dim, dof=10))
+        distributions.append(make_gaussian_skewed(key, dim=dim, cond_number=1000))
+        # distributions.append(make_gaussian_cov_wishart(key, dim=dim, dof=10))
         # distributions.append(make_rosenbrock(key))
     return distributions
 

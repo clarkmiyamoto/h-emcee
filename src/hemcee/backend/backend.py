@@ -41,6 +41,9 @@ class Backend(object):
         self.nwalkers: int         = int(nwalkers)
         self.ndim: int             = int(ndim)
         self.iteration: int        = 0
+        self.iteration_warmup: int = 0
+        self.iteration_main: int   = 0
+        self._warmup_end_index: int = None  # Index where warmup ends
         self.accepted: jnp.ndarray = jnp.zeros(self.nwalkers, dtype=self.dtype, device=self.device)
         self.chain: List[jnp.ndarray]    = []
         self.log_prob: List[jnp.ndarray] = []
@@ -100,7 +103,7 @@ class Backend(object):
 
         """
         values = self.get_value("log_prob", **kwargs)
-        return jnp.concatenate(values, axis=0)
+        return values
 
     def get_last_sample(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Access the most recent sample in the chain"""
@@ -179,7 +182,7 @@ class Backend(object):
             coords (jnp.ndarray): Coordinates array of shape (nsteps, nwalkers, ndim)
             log_prob (jnp.ndarray): Log probability array of shape (nsteps, nwalkers)
             accepted (jnp.ndarray): Accepted array of shape (nwalkers,)
-            index (int): Starting index for the slice
+            index (int): Starting index for this slice in the full chain
         """        
         # Move to storage device
         coords = jax.device_put(coords, self.device)
@@ -189,9 +192,6 @@ class Backend(object):
         # Get current dimensions
         nsteps, nwalkers, ndim = coords.shape
         
-        # Resize datasets if necessary
-        current_size = self.iteration
-        
         # Write the data to storage
         self.chain.append(coords)
         self.log_prob.append(log_prob)
@@ -199,6 +199,20 @@ class Backend(object):
         
         # Update iteration counter
         self.iteration = index + nsteps
+        
+        # Update warmup/main counters based on warmup_end_index
+        if self._warmup_end_index is None:
+            # Warmup not completed yet, count everything as warmup
+            self.iteration_warmup = self.iteration
+            self.iteration_main = 0
+        else:
+            # Warmup has been marked as complete
+            self.iteration_warmup = min(self.iteration, self._warmup_end_index)
+            self.iteration_main = max(0, self.iteration - self._warmup_end_index)
+    
+    def mark_warmup_end(self):
+        """Mark the current iteration as the end of warmup phase."""
+        self._warmup_end_index = self.iteration
 
     def __enter__(self):
         return self

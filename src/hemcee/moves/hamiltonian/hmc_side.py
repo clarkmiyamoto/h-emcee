@@ -2,10 +2,6 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 
-'''
-TODO: If there are nan's you want the program to crash
-      Code must also be -inf safe.
-'''
 
 def hmc_side_move(
     group1: jnp.ndarray,
@@ -55,7 +51,7 @@ def hmc_side_move(
 
     momentum = jax.random.normal(key_momentum, shape=(n_chains_per_group,))
 
-    group1_proposed, momentum_proposed = leapfrog_side_move(
+    group1_proposed, momentum_proposed, momentum_proposed_projected = leapfrog_side_move(
             group1, 
             momentum, 
             grad_log_prob, 
@@ -67,14 +63,15 @@ def hmc_side_move(
     current_U1 = -1 * log_prob(group1) # Shape (n_chains_per_group, dim) -> (n_chains_per_group,)
     current_K1 = 0.5 * momentum**2
 
-    proposed_U1 = -1 * log_prob(group1_proposed) # Shape (n_chains_per_group,)
+    proposed_log_prob = log_prob(group1_proposed) # Shape (n_chains_per_group,)
+    proposed_U1 = -1 * proposed_log_prob # Shape (n_chains_per_group,)
     proposed_K1 = 0.5 * momentum_proposed**2
 
     dH1 = (proposed_U1 + proposed_K1) - (current_U1 + current_K1) # Shape (n_chains_per_group,)
     log_accept_prob1 = jnp.minimum(0.0, -dH1)
         
     # Track acceptance for first chains
-    return group1_proposed, log_accept_prob1
+    return group1_proposed, log_accept_prob1, momentum_proposed_projected, proposed_log_prob
 
 
 def leapfrog_side_move(
@@ -129,4 +126,7 @@ def leapfrog_side_move(
     
     p -= 0.5 * beta_eps * gradient_projections
 
-    return q, p # Shape (n_chains_per_group, dim), (n_chains_per_group,)
+    # For logging purposes
+    p_projected = diff_particles_group2 * jnp.expand_dims(p, axis=1) # Shape (n_chains_per_group, dim)
+
+    return q, p, p_projected # Shape (n_chains_per_group, dim), (n_chains_per_group,), (n_chains_per_group, dim)

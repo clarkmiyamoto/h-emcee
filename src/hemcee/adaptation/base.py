@@ -18,7 +18,12 @@ class Adapter(ABC):
         pass
     
     @abstractmethod
-    def update(self, state, accept_rate: float, positions: jnp.ndarray):
+    def update(self, 
+               state, 
+               log_accept_rate: jnp.ndarray, 
+               position_proposed: jnp.ndarray,
+               momentum_proposed: jnp.ndarray,
+               integration_time_jittered: float):
         """Update state given acceptance rate and current positions."""
         pass
     

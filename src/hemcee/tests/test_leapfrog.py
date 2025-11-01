@@ -42,13 +42,13 @@ def is_time_reversal_symmetric(leapfrog, q, p, grad_log_prob, step_size, L, othe
         (bool): True if the integrator is time reversal symmetric, False otherwise.
     """
     # Run integrator forwards in time
-    qL, pL = leapfrog(q, p, 
+    qL, pL, pL_projected = leapfrog(q, p, 
         grad_log_prob, step_size, L, other_q)
     
     # Run integrator backwards in time
     qR_in = qL
     pR_in = -1 * pL
-    qR, pR = leapfrog(qR_in, pR_in, 
+    qR, pR, pR_projected = leapfrog(qR_in, pR_in, 
         grad_log_prob, step_size, L, other_q)
     
     qR_out = qR

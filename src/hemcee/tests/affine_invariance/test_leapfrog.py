@@ -47,9 +47,9 @@ def test_AffineInvariance_Walk(seed: int):
     centered_transformed = centered @ A.T # # Shape (n_chains_per_group, dim)
 
     # Run leapfrog integrator
-    q_regular, p_regular = leapfrog_walk_move(q, p, score_vmap, step_size, L, centered)
+    q_regular, p_regular, p_projected = leapfrog_walk_move(q, p, score_vmap, step_size, L, centered)
     q_regular = jnp.einsum('ij,bj->bi', A, q_regular) + b[None, :]
-    q_transformed, p_transformed = leapfrog_walk_move(q_transformed, p, score_vmap_pushforward, step_size, L, centered_transformed)
+    q_transformed, p_transformed, p_projected_transformed = leapfrog_walk_move(q_transformed, p, score_vmap_pushforward, step_size, L, centered_transformed)
 
     # Check equality for affine invariant moves
     assert jnp.allclose(q_transformed, q_regular)
@@ -91,9 +91,9 @@ def test_AffineInvariance_Side(seed: int):
     centered_transformed = centered @ A.T  # Shape (dim,)
 
     # Run leapfrog integrator
-    q_regular, p_regular = leapfrog_side_move(q, p, score_vmap, step_size, L, centered)
+    q_regular, p_regular, p_projected = leapfrog_side_move(q, p, score_vmap, step_size, L, centered)
     q_regular = jnp.einsum('ij,bj->bi', A, q_regular) + b[None, :]
-    q_transformed, p_transformed = leapfrog_side_move(q_transformed, p, score_vmap_pushforward, step_size, L, centered_transformed)
+    q_transformed, p_transformed, p_projected_transformed = leapfrog_side_move(q_transformed, p, score_vmap_pushforward, step_size, L, centered_transformed)
 
     # Check equality for affine invariant moves
     assert jnp.allclose(q_transformed, q_regular)

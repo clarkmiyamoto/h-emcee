@@ -2,19 +2,12 @@
 High-level sampler implementations for hemcee.
 """
 
-from abc import ABC, abstractmethod
-from typing import Callable, Optional, Sequence, Tuple
+from abc import ABC
+from typing import Callable
 import jax
 import jax.numpy as jnp
-
-from hemcee.moves.hamiltonian.hmc import hmc_move
-from hemcee.moves.hamiltonian.hmc_walk import hmc_walk_move
-from hemcee.moves.vanilla.walk import walk_move
-from hemcee.adaptation.adapter import select_adapter, Adapter
-from hemcee.adaptation.chees import ChEESParameters
-from hemcee.adaptation.dual_averaging import DAParameters
+import hemcee
 from hemcee.backend.backend import Backend
-from hemcee.samplers.sampler_utils import accept_proposal, calculate_batch_size, batched_scan
 
 
 class BaseSampler(ABC):
@@ -99,3 +92,10 @@ class BaseSampler(ABC):
                     thin: int = 1, 
                     flat: bool = False) -> jnp.ndarray:
         return self.backend.get_log_prob(discard=discard, thin=thin, flat=flat)
+    
+    def get_acceptance_prob(self):
+        return self.backend.accepted / self.backend.iteration
+    
+    def get_autocorr(self, discard, thin):
+        x = self.get_chain(discard=discard, thin=thin, flat=False)
+        return hemcee.autocorr.integrated_time(x)

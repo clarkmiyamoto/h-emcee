@@ -3,32 +3,31 @@ from typing import NamedTuple
 
 from hemcee.moves.hamiltonian.hmc_walk import leapfrog_walk_move
 
-class State(NamedTuple):
-    position: jnp.ndarray
-    momentum: jnp.ndarray
-
-# Leapfrog + U-Turn
-def is_u_turn(state_left: State, state_right: State, complement_ensemble: jnp.ndarray) -> bool:
-    """Return True if a U-turn is detected between z_left and z_right."""
-    n_complement = complement_ensemble.shape[0]
-    delta_theta = state_left.position - state_right.position
+def u_turn_condition(r_current: jnp.ndarray, 
+                          z_current: jnp.ndarray, 
+                          z_initial: jnp.ndarray,
+                          centering: jnp.ndarray,
+                          inv_covariance: jnp.ndarray) -> jnp.ndarray:
+    """
+    Original No-U-Turn condition from Hoffman & Gelman 2014.
     
-    # Convert ensemble momentum to position space
-    complement_mean = jnp.mean(complement_ensemble, axis=0)
-    centered_complement = (complement_ensemble - complement_mean) / jnp.sqrt(n_complement)
-    precision = centered_complement @ centered_complement.T
+    U-turn detected if: r · (z_current - z_initial) ≤ 0
     
-    change_in_position_cov = jnp.linalg.solve(precision, delta_theta)
+    Args:
+        r_current: Current momentum. Shape (n_walkers_per_group,)
+        z_current: Current position. Shape (dim,)
+        z_initial: Initial position. Shape (dim,)
+        centering: Centering matrix for momentum to position space conversion. Shape (dim, n_walkers_per_group)
+        inv_covariance: Inverse covariance matrix for position space. Shape (dim, dim)
+        
+    Returns:
+        Boolean indicating if U-turn is detected
+    """
+    # Calculate displacement vector
+    displacement = z_current - z_initial
     
-    # Weighted inner products: delta_theta^T * cov_inv * p
-    p_plus = state_left.momentum @ centered_complement
-    p_minus = state_right.momentum @ centered_complement
-
-    dot_plus = change_in_position_cov @ p_plus
-    dot_minus = change_in_position_cov @ p_minus
+    # Calculate dot product: (z_current - z_initial)^T * inv_covariance * centering * r_current
+    dot_product = displacement @ inv_covariance @ centering @ r_current
     
-    return (dot_plus >= 0) & (dot_minus >= 0)
-
-def leapfrog(state: State, grad_log_prob: Callable, step_size: float, centered_complement: jnp.ndarray) -> State:
-    """One leapfrog (or any reversible symplectic) step from z."""
-    return leapfrog_walk_move(state.position, state.momentum, grad_log_prob, step_size, 1, centered_complement)
+    # U-turn if dot product is negative or zero
+    return dot_product <= 0

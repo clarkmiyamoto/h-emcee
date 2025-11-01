@@ -31,7 +31,8 @@ def batched_scan(body_fn: Callable,
                  xs: jnp.ndarray, 
                  batch_size: int,
                  backend: Backend,
-                 show_progress = False) -> tuple[Any, Any]:
+                 show_progress = False,
+                 offset: int = 0) -> tuple[Any, Any]:
     """Run jax.lax.scan in batches to reduce memory usage.
     
     Args:
@@ -41,6 +42,7 @@ def batched_scan(body_fn: Callable,
         batch_size: Size of each batch.
         backend: Backend for storing intermediate results.
         show_progress: Whether to display a progress bar.
+        offset: Starting iteration index for backend storage (default 0).
         
     Returns:
         Tuple[Any, Any]: Final carry state and backend.
@@ -72,7 +74,7 @@ def batched_scan(body_fn: Callable,
             coords=coords,
             log_prob=log_prob,
             accepted=jnp.sum(accepted, axis=0),
-            index=start_idx
+            index=offset + start_idx
         )
 
         # Clear memory
@@ -80,7 +82,7 @@ def batched_scan(body_fn: Callable,
     
     # Concatenate all samples
     
-    return carry
+    return carry, backend
 
 
 def accept_proposal(

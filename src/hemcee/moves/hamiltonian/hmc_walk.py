@@ -35,7 +35,7 @@ def hmc_walk_move(
     momentum = jax.random.normal(key, shape=(n_chains_per_group, n_chains_per_group))
     
     # Leapfrog Integration
-    group1_proposed, momentum_proposed = leapfrog_walk_move(
+    group1_proposed, momentum_proposed, momentum_projected = leapfrog_walk_move(
         group1, 
         momentum, 
         grad_log_prob, 
@@ -46,13 +46,15 @@ def hmc_walk_move(
     current_U = -1 * log_prob(group1) # Shape (n_chains_per_group,)
     current_K = 0.5 * jnp.sum(momentum**2, axis=1) # Shape (n_chains_per_group,)
     
-    proposed_U = -1 * log_prob(group1_proposed)
+    proposed_log_prob = log_prob(group1_proposed)
+    proposed_U = -1 * proposed_log_prob
     proposed_K = 0.5 * jnp.sum(momentum_proposed**2, axis=1)
 
     dH = (proposed_U + proposed_K) - (current_U + current_K)
     log_accept_prob1 = jnp.minimum(0.0, -dH)
 
-    return group1_proposed, log_accept_prob1
+
+    return group1_proposed, log_accept_prob1, momentum_projected, proposed_log_prob
 
 def leapfrog_walk_move(
     q: jnp.ndarray,
@@ -97,4 +99,7 @@ def leapfrog_walk_move(
     grad = -1 * grad_log_prob(q) # Shape (n_chains_per_group, dim)
     p -= 0.5 * beta_eps * jnp.dot(grad, centered.T)
 
-    return q, p
+    # For logging purposes
+    p_projected = p @ centered  # Shape (n_chains_per_group, dim)
+
+    return q, p, p_projected

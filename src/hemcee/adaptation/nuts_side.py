@@ -3,18 +3,22 @@ from typing import NamedTuple
 
 from hemcee.moves.hamiltonian.hmc_side import leapfrog_side_move
 
-class State(NamedTuple):
-    position: jnp.ndarray
-    momentum: jnp.ndarray
-
-# Leapfrog + U-Turn
-def is_u_turn(z_left: State, z_right: State) -> bool:
-    """Return True if a U-turn is detected between z_left and z_right."""
-    momentum_left = z_left.momentum
-    momentum_right = z_right.momentum
+def u_turn_condition(r_current: jnp.ndarray, 
+                     r_initial: jnp.ndarray) -> jnp.ndarray:
+    """
+    Side No-U-Turn condition for momentum comparison.
     
-    return (momentum_left * momentum_right < 0)
-
-def leapfrog(z: State, grad_log_prob: Callable, step_size: float, complement: jnp.ndarray) -> State:
-    """One leapfrog (or any reversible symplectic) step from z."""
-    return leapfrog_side_move(z.position, z.momentum, grad_log_prob, step_size, 1, complement)
+    U-turn detected if: r_current · r_initial ≤ 0
+    
+    Args:
+        r_current: Current momentum vector
+        r_initial: Initial momentum vector
+        
+    Returns:
+        Boolean indicating if U-turn is detected
+    """
+    # Calculate dot product: r_current · r_initial
+    dot_product = jnp.dot(r_current, r_initial)
+    
+    # U-turn if dot product is negative or zero
+    return dot_product <= 0

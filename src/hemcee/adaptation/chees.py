@@ -1,17 +1,16 @@
-from typing import NamedTuple
+from typing import NamedTuple, Callable
 import jax.numpy as jnp
 from .base import Adapter
 
 class ChEESState(NamedTuple):
     """
     Args:
-        q (jnp.ndarray): Positions of walkers. Shape (batch_size, dim)
-        mu (jnp.ndarray). Shape (dim).
         T (float): Current integration time
     """
-    q: jnp.ndarray           # (B,d)
-    mu: jnp.ndarray          # (d,)
-    T: float
+    log_T: float
+    first_moment: float
+    second_moment: float
+    iteration: int 
 
 class ChEESParameters(NamedTuple):
     """
@@ -20,108 +19,154 @@ class ChEESParameters(NamedTuple):
     Args:
         T_min: Minimum allowed integration time.
         T_max: Maximum allowed integration time.
+
         lr_T: Learning rate for the integration time.
-        mu_momentum: Momentum for the running mean.
-        jitter: Jitter for the integration time.
-        metric: Use O(n) invariant metric, or affine invariant metric. Choices ('euclidean', 'mahalanobis')
+        beta1: Beta1 for ADAM optimizer.
+        beta2: Beta2 for ADAM optimizer.
+        epsilon: Epsilon for ADAM optimizer.
     """
     T_min: float = 0.25
     T_max: float = 10.0
-    lr_T: float = 5e-3
-    mu_momentum: float = 0.9  # EMA momentum for running mean
-    jitter: float = 0.01 
-    metric: str = 'euclidean' # or 'mahalanobis' 
+    T_interpolation: float = 0.9
 
+    # ADAM Optimizer Parameters
+    lr_T: float = 0.025
+    beta1: float = 0.0
+    beta2: float = 0.95
+    regularization: float = 1e-7
 
 class ChEESAdapter(Adapter):
     """ChEES adapter for integration time adaptation."""
     
-    def __init__(self, parameters: ChEESParameters, initial_step_size: float, initial_L: float):
+    def __init__(self, parameters: ChEESParameters, move_type: str, initial_step_size: float, initial_L: float):
         self.parameters = parameters
         self.passthrough_step_size = initial_step_size
-        self.inital_L = initial_L
+        self.initial_L = initial_L
 
-        if parameters.metric == 'euclidean':
-            self.chess_grad = chees_grad_T_euclidean
-        elif parameters.metric == 'mahalanobis':
-            self.chess_grad = chees_grad_T_mahalanobis
+        self.move_type = move_type
+
+        if self.move_type == 'hmc_move':
+            self.innerproduct = lambda group1, group2, projected_momentum1: jnp.einsum('bd,bd->b', group1, projected_momentum1)
+        elif (self.move_type == 'hmc_walk_move') or (self.move_type == 'hmc_side_move'):
+            def innerproduct(group1: jnp.ndarray, 
+                             group2: jnp.ndarray, 
+                             projected_momentum1: jnp.ndarray) -> float:
+                '''
+                Args:
+                    group1: Shape (walkers_group1, dim)
+                    group2: Shape (walkers_group2, dim)
+                    projected_momentum1: Shape (walkers_group1, dim)
+
+                Returns:
+                    Inner product of group1 and projected_momentum1 with 
+                        respect to the covariance of group2. Shape (walkers_group1,)
+                '''
+                covariance = jnp.cov(group2, rowvar=False)
+                covariance = jnp.atleast_2d(covariance)  # Ensure it's at least 2D
+                result = jnp.linalg.solve(covariance, projected_momentum1.T).T
+                return jnp.sum(group1 * result, axis=1)  # Shape: (walkers_group1,)
+            self.innerproduct = innerproduct
         else:
-            raise ValueError('Metric for ChEES tuner is not suppported. Choose between ["euclidean", "mahalanobis"]')
+            raise ValueError('Move type for ChEES tuner is not suppported. Choose between ["hmc", "hmc_walk", "hmc_side"]')
     
     def init(self, dim: int) -> ChEESState:
         """Initialize ChEES state."""
         return ChEESState(
-            q=jnp.zeros(dim),
-            mu=jnp.zeros(dim),
-            T=self.inital_L
+            log_T = jnp.log(self.initial_L * self.passthrough_step_size),
+            first_moment = 0.0,
+            second_moment = 0.0,
+            iteration = 0
         )
     
-    def update(self, state: ChEESState, accept_rate: float, positions: jnp.ndarray) -> ChEESState:
-        """Update integration time using ChEES."""
-        # Update running mean across batch
-        mu_new = welford_ema_mean(state.mu, positions, self.parameters.mu_momentum)
+    def update(self, 
+               state: ChEESState, 
+               log_accept_rate: jnp.ndarray, 
+               position_current: jnp.ndarray,
+               position_proposed: jnp.ndarray,
+               momentum_proposed: jnp.ndarray,
+               group2: jnp.ndarray,
+               integration_time_jittered: float) -> ChEESState:
+        """
+        Update integration time using ChEES.
         
-        # Simplified ChEES gradient (positions-only version)
-        dq0 = state.q - state.mu
-        dq1 = jnp.mean(positions, axis=0) - state.mu
-        qnorm_diff = jnp.sum(dq1 * dq1) - jnp.sum(dq0 * dq0)
-        grad_T = accept_rate * qnorm_diff * state.T
-        
-        # Gradient ascent on log T
-        logT = jnp.log(state.T) + self.parameters.lr_T * grad_T
-        T_new = jnp.clip(jnp.exp(logT), self.parameters.T_min, self.parameters.T_max)
-        
-        return ChEESState(q=jnp.mean(positions, axis=0), mu=mu_new, T=T_new)
+        Args:
+            state: State of ChEES algorithm
+            log_accept_rate: Shape (num_walkers,)
+            position_current: Shape (num_walkers, dim)
+            position_proposed: Shape (num_walkers, dim)
+            momentum_proposed: Shape (num_walkers, dim)
+            group2: Shape (walkers_group2, dim)
+            integration_time_jittered: t_n = jitter * integration_time.
+                Meaning you ran leapfrog for $L = round(t_n / step_size)$ steps
+        """    
+        acceptance_prob = jnp.clip(jnp.exp(log_accept_rate), 0.0, 1.0) # Shape (batch_size,)
+
+        mean_previous = jnp.mean(position_current, axis=0)
+        mean_proposed = jnp.mean(position_proposed, axis=0)
+
+        centered_previous = position_current - mean_previous
+        centered_proposed = position_proposed - mean_proposed
+
+        diff_sqnorm = jnp.sum(centered_proposed**2, axis=1) - jnp.sum(centered_previous**2, axis=1) # Shape ()
+
+        # Computes gradient signal according to O(n) invariant inner product or by affine invariant inner product
+        g_m = integration_time_jittered * diff_sqnorm * self.innerproduct(centered_proposed, group2, momentum_proposed)
+        # Filter out gradients from extreme cases
+        g_m = jnp.where(acceptance_prob > 1e-4, g_m, 0.0)
+        g_m = jnp.where(jnp.isfinite(g_m), g_m, 0.0)
+
+        # Weight gradient signal by acceptance probability
+        g_hat = jnp.sum(acceptance_prob * g_m) / jnp.sum(acceptance_prob + self.parameters.regularization) # Shape (1,)
+
+        state_proposed = adam_optimizer_step(g_hat, state, self.parameters)
+    
+        return state_proposed
     
     def value(self, state: ChEESState) -> tuple[float, int]:
         """Get current integration length. Returns (unchanged_step_size, integration_length)."""
-        integration_length = state.T/self.passthrough_step_size
+        T = jnp.exp(state.log_T)
+        integration_length = jnp.maximum(jnp.round(T/self.passthrough_step_size), 1)
         integration_length = jnp.astype(integration_length, int)
         return (self.passthrough_step_size, integration_length)
     
     def finalize(self, state: ChEESState) -> tuple[float, int]:
         """Get final integration length. Returns (unchanged_step_size, integration_length)."""
-        integration_length = jnp.round(state.T/self.passthrough_step_size)
+        T = jnp.exp(state.log_T)
+        integration_length = jnp.maximum(jnp.round(T/self.passthrough_step_size), 1)
         integration_length = jnp.astype(integration_length, int)
         return (self.passthrough_step_size, integration_length)
+    
+    def _get_T(self, state):
+        return jnp.exp(state.log_T)
 
-def welford_ema_mean(mu: jnp.ndarray, x: jnp.ndarray, momentum: float) -> jnp.ndarray:
-   """Exponential moving average of mean across batch dimension 0.
-   Args:
-      mu: (..., d) previous mean
-      x: (B, ..., d) batch of samples to incorporate
-      momentum: in [0,1). new_mu = momentum*mu + (1-momentum)*mean(x)
-   """
-   batch_mean = jnp.mean(x, axis=0)
-   return momentum * mu + (1.0 - momentum) * batch_mean
 
-def chees_grad_T_euclidean(
-    positions_initial: jnp.ndarray, 
-    positions_proposed: jnp.ndarray, 
-    momenta_proposed: jnp.ndarray, 
-    integration_times: jnp.ndarray, 
-    mu: jnp.ndarray, 
-    accept: jnp.ndarray
-) -> jnp.ndarray:
-    """Per-iteration stochastic gradient estimator for d/dT of ChEES objective.
+def adam_optimizer_step(gradient_signal: float, 
+                        state: ChEESState,
+                        parameters: ChEESParameters) -> ChEESState:
+    '''
+    Performs single step of ADAM optimzier
+    
     Args:
-        positions_initial: (B, d) start positions
-        positions_proposed: (B, d) proposed end positions
-        momenta_proposed: (B, d) end momenta (after final half step)
-        integration_times:  (B,)  actual integration times used (u*T per chain)
-        mu: (d,)   running mean used in criterion
-        accept: (B,) accept indicators or probabilities
-    Returns:
-        scalar gradient estimate wrt T (averaged over batch)
-    """
-    dq0 = positions_initial - mu  # (B, d)
-    dq1 = positions_proposed - mu  # (B, d)
-    qnorm_diff = jnp.sum(dq1 * dq1, axis=-1) - jnp.sum(dq0 * dq0, axis=-1)  # (B,)
-    inner = jnp.sum(dq1 * momenta_proposed, axis=-1)  # (B,)
-    # Gradient estimator (matches whitened Euclidean formula): t * (Δ||·||^2) * <dq1, momenta_proposed>
-    g_i = integration_times * qnorm_diff * inner  # (B,)
-    g_i = g_i * accept  # damp by accept prob/indicator
-    return jnp.mean(g_i)
+        gradient_signal: Gradient signal.
+        state: State of ChEES algorithm.
+        parameters: Parameters for ADAM optimizer.
+    '''
+    iteration = state.iteration + 1
+    
+    first_moment = parameters.beta1 * state.first_moment + (1 - parameters.beta1) * gradient_signal
+    second_moment = parameters.beta2 * state.second_moment + (1 - parameters.beta2) * gradient_signal ** 2
+
+    bias_corrected_m_t = first_moment / (1 - parameters.beta1 ** iteration)
+    bias_corrected_v_t = second_moment / (1 - parameters.beta2 ** iteration)
+
+    log_T_update = state.log_T - parameters.lr_T * bias_corrected_m_t / jnp.sqrt(bias_corrected_v_t + parameters.regularization)
+    log_T_update = jnp.clip(log_T_update, min=-0.35, max=0.35)
+    log_T = state.log_T + log_T_update
+
+    log_T = jnp.logaddexp(log_T + jnp.log(parameters.T_interpolation), state.log_T + jnp.log(1 - parameters.T_interpolation))
+    log_T = jnp.log(jnp.clip(jnp.exp(log_T), min=parameters.T_min, max=parameters.T_max))
+
+    return ChEESState(log_T=log_T, first_moment=first_moment, second_moment=second_moment, iteration=iteration)
 
 def chees_grad_T_mahalanobis(
     positions_initial: jnp.ndarray, 
