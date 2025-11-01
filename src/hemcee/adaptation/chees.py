@@ -167,13 +167,3 @@ def adam_optimizer_step(gradient_signal: float,
     log_T = jnp.log(jnp.clip(jnp.exp(log_T), min=parameters.T_min, max=parameters.T_max))
 
     return ChEESState(log_T=log_T, first_moment=first_moment, second_moment=second_moment, iteration=iteration)
-
-def chees_grad_T_mahalanobis(
-    positions_initial: jnp.ndarray, 
-    positions_proposed: jnp.ndarray, 
-    momenta_proposed: jnp.ndarray, 
-    integration_times: jnp.ndarray, 
-    mu: jnp.ndarray, 
-    accept: jnp.ndarray
-) -> jnp.ndarray:
-    raise NotImplementedError()
