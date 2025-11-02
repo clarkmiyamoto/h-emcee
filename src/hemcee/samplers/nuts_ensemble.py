@@ -100,6 +100,7 @@ class EnsembleNUTS(BaseSampler):
                      adapter,
                      batch_size: int,
                      show_progress: bool):
+        raise NotImplementedError()
         """Run warmup phase with step size adaptation."""
         def body(carry, keys):
             group1, group2, step_size, adapter_state, diagnostics = carry
@@ -109,26 +110,16 @@ class EnsembleNUTS(BaseSampler):
                 keys[0], group1, group2, self.log_prob, self.grad_log_prob,
                 step_size, self.max_tree_depth
             )
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob1, keys[2])
+
             
             # Update group 2 using group 1 as complement
             group2_proposed, log_accept_prob2 = self.move(
                 keys[1], group2, group1, self.log_prob, self.grad_log_prob,
                 step_size, self.max_tree_depth
             )
-            
-            # Accept/reject proposals (NUTS already handles MH internally via log_accept_prob)
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob1, keys[2])
             group2, accept2 = accept_proposal(group2, group2_proposed, log_accept_prob2, keys[3])
             
-            # Combine diagnostics
-            all_accepts = jnp.concatenate([accept1, accept2])
-            current_accept_rate = jnp.mean(all_accepts)
-            final_states = jnp.concatenate([group1, group2])
-            final_log_probs = self.log_prob(final_states)
-            
-            # Adaptation
-            adapter_state_new = adapter.update(adapter_state, current_accept_rate, final_states)
-            step_size_new, _ = adapter.value(adapter_state_new)
             
             # Update diagnostics
             new_diagnostics = {
@@ -174,6 +165,7 @@ class EnsembleNUTS(BaseSampler):
                    batch_size: int,
                    show_progress: bool,
                    warmup_offset: int):
+        raise NotImplementedError()
         """Run main sampling phase with fixed step size."""
         def body(carry, keys):
             group1, group2, diagnostics = carry
