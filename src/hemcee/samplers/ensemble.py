@@ -93,10 +93,9 @@ class EnsembleSampler(BaseSampler):
 
             # Construct Proposal
             group1_proposed, log_prob_group1 = self.move(group1, group2, keys[0], self.log_prob, **kwargs)
-            group2_proposed, log_prob_group2 = self.move(group2, group1, keys[1], self.log_prob, **kwargs)
-
-            # Accept proposal?
             group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
+
+            group2_proposed, log_prob_group2 = self.move(group2, group1, keys[1], self.log_prob, **kwargs)
             group2, accept2 = accept_proposal(group2, group2_proposed, log_prob_group2, keys[1])
 
             #### Logging diagnostics

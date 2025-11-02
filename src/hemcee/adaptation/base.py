@@ -21,9 +21,7 @@ class Adapter(ABC):
     def update(self, 
                state, 
                log_accept_rate: jnp.ndarray, 
-               position_proposed: jnp.ndarray,
-               momentum_proposed: jnp.ndarray,
-               integration_time_jittered: float):
+               **kwargs):
         """Update state given acceptance rate and current positions."""
         pass
     

@@ -157,7 +157,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
         def body(carry, keys):
             group1, group2, adapter_state, diagnostics = carry
 
-            #### Group 1 / Group 2 Update
+            #### Group 1 Update
             step_size, L = adapter.value(adapter_state)
             group1_proposed, log_accept_prob_1, momentum_projected_1, proposed_log_prob_1 = self.move(group1, group2, 
                 step_size, keys[0],
@@ -173,7 +173,10 @@ class HamiltonianEnsembleSampler(BaseSampler):
                 group2=group2,
                 integration_time_jittered = step_size * L)
             
-            # Update group 2 using group 1 as complement
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob_1, keys[2])
+
+            
+            ### Group 2 Update
             step_size, L = adapter.value(adapter_state_after_group1)  
             group2_proposed, log_accept_prob_2, momentum_projected_2, proposed_log_prob_2 = self.move(group2, group1, 
                 step_size, keys[1],
@@ -189,8 +192,6 @@ class HamiltonianEnsembleSampler(BaseSampler):
                 group2=group1,
                 integration_time_jittered = step_size * L)
             
-            #### Accept proposal?
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob_1, keys[2])
             group2, accept2 = accept_proposal(group2, group2_proposed, log_accept_prob_2, keys[3])
 
             #### Combine diagnostics
