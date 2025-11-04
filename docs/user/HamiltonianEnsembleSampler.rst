@@ -7,7 +7,7 @@ more efficiently than simple random-walk methods.
 
 
 
-.. autoclass:: hemcee.sampler.HamiltonianEnsembleSampler
+.. autoclass:: hemcee.samplers.hamiltonian_ensemble.HamiltonianEnsembleSampler
    :members:
    :undoc-members:
    :show-inheritance:
