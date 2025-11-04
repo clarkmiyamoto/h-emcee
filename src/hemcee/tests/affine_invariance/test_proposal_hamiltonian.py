@@ -63,13 +63,15 @@ def run(move_fn, seed):
 
     ### Proposal Paths
     # Path A: Original coordinates, then affine transformation
+    log_prob_group1 = log_prob_func_vmap(group1)
     group1_proposed_A, _, _, _ = move_fn(group1, group2, step_size, keys[6], 
-        log_prob_func_vmap, grad_log_prob_func_vmap, L)
+        log_prob_func_vmap, grad_log_prob_func_vmap, L, log_prob_group1)
     group1_proposed_A = jnp.einsum('ji,bi->bj', A, group1_proposed_A) + b[None, :]
 
     # Path B: Affine transformation, then original coordinates
+    log_prob_group1_transformed = log_prob_pushforward_func_vmap(group1_transformed)
     group1_proposed_B, _, _, _ = move_fn(group1_transformed, group2_transformed, step_size, keys[6], 
-        log_prob_pushforward_func_vmap, grad_log_prob_pushforward_func_vmap, L)
+        log_prob_pushforward_func_vmap, grad_log_prob_pushforward_func_vmap, L, log_prob_group1_transformed)
 
     ### Check equality for affine invariant moves
     assert jnp.allclose(group1_proposed_A, group1_proposed_B)

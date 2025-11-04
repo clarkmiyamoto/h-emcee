@@ -73,10 +73,10 @@ class DualAveragingAdapter(Adapter):
         
         # Dual averaging update
         eta = 1.0 / (it + self.parameters.t0)
-        H_bar = state.H_bar + (self.parameters.target_accept - accept_rate)
+        H_bar = (1.0 - eta) * state.H_bar + eta * (self.parameters.target_accept - accept_rate)
 
         soft_t = it + self.parameters.t0
-        log_eps = self.initial_step_size - (jnp.sqrt(it) / (soft_t * self.parameters.gamma)) * H_bar
+        log_eps = jnp.log(self.initial_step_size) - (jnp.sqrt(it) / (soft_t * self.parameters.gamma)) * H_bar
         
         eta = it ** (-self.parameters.kappa)
         log_eps_bar = eta * log_eps + (1.0 - eta) * state.log_stepsize_bar

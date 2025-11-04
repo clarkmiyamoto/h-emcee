@@ -3,10 +3,13 @@ import jax.numpy as jnp
 from typing import Callable
 
 def stretch_move(
-    group1: jnp.ndarray, group2: jnp.ndarray,
+    group1: jnp.ndarray, 
+    group2: jnp.ndarray,
     key: jax.random.PRNGKey,
     log_prob: Callable,
-    stretch: float = 2.0):
+    log_prob_group1: jnp.ndarray,
+    stretch: float = 2.0,
+    ):
     """Perform the affine-invariant stretch move.
 
     Implements Algorithm 1 from https://arxiv.org/pdf/2505.02987.
@@ -19,10 +22,12 @@ def stretch_move(
         key (jax.random.PRNGKey): Random number generator key.
         log_prob (Callable): Vectorized log-probability function.
         stretch (float): Stretch parameter ``a`` satisfying ``a >= 1``.
+        log_prob_group1 (jnp.ndarray, optional): Pre-computed log probabilities for ``group1``.
+            If None, will be computed. Shape ``(n_chains_per_group,)``.
 
     Returns:
-        tuple[jnp.ndarray, jnp.ndarray]: Proposed positions for ``group1`` and
-            their log acceptance probabilities.
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]: Proposed positions for ``group1``,
+            their log acceptance probabilities, and proposed log probabilities.
     """
     n_chains_per_group = int(group1.shape[0])
     dim = int(group1.shape[1])
@@ -43,9 +48,11 @@ def stretch_move(
     z = sample_inv_sqrt_density(key_stretch, a=stretch, shape=(n_chains_per_group,))
     group1_proposed = group2[random_indices] + z[:, None] * (group1 - group2[random_indices])
 
-    log_accept_prob = (dim - 1) * jnp.log(z) + log_prob(group1_proposed) - log_prob(group1) 
+    
+    log_prob_group1_proposed = log_prob(group1_proposed)
+    log_accept_prob = (dim - 1) * jnp.log(z) + log_prob_group1_proposed - log_prob_group1
 
-    return group1_proposed, log_accept_prob
+    return group1_proposed, log_accept_prob, log_prob_group1_proposed
 
 def sample_inv_sqrt_density(key: jax.random.PRNGKey, a: float, shape=()):
     """Sample from the ``z^{-1/2}`` density on ``[1/a, a]``.

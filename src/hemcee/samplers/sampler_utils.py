@@ -70,6 +70,10 @@ def batched_scan(body_fn: Callable,
         
         # Extracts data & saves to backend
         coords, log_prob, accepted = outputs
+       
+        if jnp.any(jnp.isnan(log_prob)) or jnp.any(jnp.isinf(log_prob)):
+            raise ValueError("Log probability returned NaN or inf value, please check your log probability function")
+
         backend.save_slice(
             coords=coords,
             log_prob=log_prob,
@@ -81,7 +85,6 @@ def batched_scan(body_fn: Callable,
         del outputs, coords, log_prob, accepted
     
     # Concatenate all samples
-    
     return carry, backend
 
 
@@ -97,20 +100,24 @@ def accept_proposal(
 
     Args:
         current_samples (jnp.ndarray): Current ensemble state with shape
-            ``(n_chains, dim)``.
+            ``(n_chains, ...)``.
         proposed_samples (jnp.ndarray): Proposed ensemble state with shape
-            ``(n_chains, dim)``.
+            ``(n_chains, ...)``.
         log_accept_prob (jnp.ndarray): Log acceptance probabilities with shape
             ``(n_chains,)``.
         key (jax.random.PRNGKey): Random number generator key.
 
     Returns:
         Tuple[jnp.ndarray, jnp.ndarray]: Accepted samples and acceptance
-        indicators with shapes ``(n_chains, dim)`` and ``(n_chains,)``.
+        indicators with shapes ``(n_chains, ...)`` and ``(n_chains,)``.
     """
     log_u = jnp.log(jax.random.uniform(key, shape=log_accept_prob.shape, minval=1e-10, maxval=1.0))
     accept_mask = log_u < log_accept_prob
-    updated_samples = jnp.where(accept_mask[:, None], proposed_samples, current_samples)
+    
+    # Broadcast accept_mask to match the shape of samples (n_chains, ...)
+    # Reshape to (n_chains, 1, 1, ...) with appropriate number of dimensions
+    mask_shape = (-1,) + (1,) * (current_samples.ndim - 1)
+    updated_samples = jnp.where(accept_mask.reshape(mask_shape), proposed_samples, current_samples)
     
     accepts = accept_mask.astype(int)
 

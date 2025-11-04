@@ -11,6 +11,7 @@ def hmc_walk_move(
     log_prob: Callable,
     grad_log_prob: Callable,
     L: int,
+    log_prob_group1: jnp.ndarray,
 ):
     """Propose a Hamiltonian walk move.
 
@@ -24,7 +25,7 @@ def hmc_walk_move(
         log_prob (Callable): Vectorised log-probability function.
         grad_log_prob (Callable): Vectorised gradient of the potential function.
         L (int): Number of leapfrog steps.
-
+        log_prob_group1 (jnp.ndarray): Log probabilities of the first group with shape ``(n_chains_per_group,)``.
     Returns:
         Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
         probabilities for each chain.
@@ -43,7 +44,7 @@ def hmc_walk_move(
         L, 
         centered2
     )
-    current_U = -1 * log_prob(group1) # Shape (n_chains_per_group,)
+    current_U = -1 * log_prob_group1 # Shape (n_chains_per_group,)
     current_K = 0.5 * jnp.sum(momentum**2, axis=1) # Shape (n_chains_per_group,)
     
     proposed_log_prob = log_prob(group1_proposed)
@@ -51,6 +52,7 @@ def hmc_walk_move(
     proposed_K = 0.5 * jnp.sum(momentum_proposed**2, axis=1)
 
     dH = (proposed_U + proposed_K) - (current_U + current_K)
+    dH = jnp.where(jnp.isnan(dH), jnp.inf, dH)
     log_accept_prob1 = jnp.minimum(0.0, -dH)
 
 

@@ -88,15 +88,23 @@ class EnsembleSampler(BaseSampler):
         group1 = initial_state[:group1_size]
         group2 = initial_state[group1_size:]
         
+        # Initialize log probabilities
+        log_prob1 = self.log_prob(group1)
+        log_prob2 = self.log_prob(group2)
+        
         def body(carry, keys):
-            group1, group2, diagnostics = carry
+            group1, group2, log_prob1, log_prob2, diagnostics = carry
 
-            # Construct Proposal
-            group1_proposed, log_prob_group1 = self.move(group1, group2, keys[0], self.log_prob, **kwargs)
-            group1, accept1 = accept_proposal(group1, group1_proposed, log_prob_group1, keys[0])
+            # Construct Proposal - pass current log prob to avoid recomputation
+            group1_proposed, log_accept_prob_1, proposed_log_prob_1 = self.move(
+                group1, group2, keys[0], self.log_prob, log_prob_group1=log_prob1, **kwargs)
+            group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob_1, keys[0])
+            log_prob1, _ = accept_proposal(log_prob1, proposed_log_prob_1, log_accept_prob_1, keys[0])
 
-            group2_proposed, log_prob_group2 = self.move(group2, group1, keys[1], self.log_prob, **kwargs)
-            group2, accept2 = accept_proposal(group2, group2_proposed, log_prob_group2, keys[1])
+            group2_proposed, log_accept_prob_2, proposed_log_prob_2 = self.move(
+                group2, group1, keys[1], self.log_prob, log_prob_group1=log_prob2, **kwargs)
+            group2, accept2 = accept_proposal(group2, group2_proposed, log_accept_prob_2, keys[1])
+            log_prob2, _ = accept_proposal(log_prob2, proposed_log_prob_2, log_accept_prob_2, keys[1])
 
             #### Logging diagnostics
             all_accepts = jnp.concatenate([accept1, accept2])
@@ -104,17 +112,17 @@ class EnsembleSampler(BaseSampler):
             
             #### Construct return state
             final_states = jnp.concatenate([group1, group2])
-            final_log_probs = jnp.concatenate([log_prob_group1, log_prob_group2])
+            final_log_probs = jnp.concatenate([log_prob1, log_prob2])
 
-            return (group1, group2, diagnostics), (final_states, final_log_probs, all_accepts)
+            return (group1, group2, log_prob1, log_prob2, diagnostics), (final_states, final_log_probs, all_accepts)
                 
         carry, self.backend = batched_scan(body, 
-                             init_carry=(group1, group2, diagnostics), 
+                             init_carry=(group1, group2, log_prob1, log_prob2, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 
                              backend=self.backend,
                              show_progress=show_progress)
-        _, _, diagnostics = carry
+        _, _, _, _, diagnostics = carry
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples

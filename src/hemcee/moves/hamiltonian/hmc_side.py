@@ -11,6 +11,7 @@ def hmc_side_move(
     log_prob: Callable,
     grad_log_prob: Callable,
     L: int,
+    log_prob_group1: jnp.ndarray,
 ):
     """Propose a Hamiltonian side move.
 
@@ -24,6 +25,7 @@ def hmc_side_move(
         log_prob (Callable): Vectorised log-probability function.
         grad_log_prob (Callable): Vectorised gradient of the log-probability function.
         L (int): Number of leapfrog steps.
+        log_prob_group1 (jnp.ndarray): Log probabilities of the first group with shape ``(n_chains_per_group,)``.
 
     Returns:
         Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
@@ -60,7 +62,7 @@ def hmc_side_move(
             diff_particles_group2
     )
 
-    current_U1 = -1 * log_prob(group1) # Shape (n_chains_per_group, dim) -> (n_chains_per_group,)
+    current_U1 = -1 * log_prob_group1 # Shape (n_chains_per_group,)
     current_K1 = 0.5 * momentum**2
 
     proposed_log_prob = log_prob(group1_proposed) # Shape (n_chains_per_group,)
@@ -68,6 +70,7 @@ def hmc_side_move(
     proposed_K1 = 0.5 * momentum_proposed**2
 
     dH1 = (proposed_U1 + proposed_K1) - (current_U1 + current_K1) # Shape (n_chains_per_group,)
+    dH1 = jnp.where(jnp.isnan(dH1), jnp.inf, dH1)
     log_accept_prob1 = jnp.minimum(0.0, -dH1)
         
     # Track acceptance for first chains

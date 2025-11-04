@@ -7,6 +7,7 @@ def side_move(
     group2: jnp.ndarray,
     key: jax.random.PRNGKey,
     log_prob: Callable,
+    log_prob_group1: jnp.ndarray,
     stretch: float = 2.0,
 ):
     """Propose a side move using the affine-invariant sampler.
@@ -18,11 +19,12 @@ def side_move(
         group2 (jnp.ndarray): Complementary group with shape ``(n_chains_per_group, dim)``.
         key (jax.random.PRNGKey): Random number generator key.
         log_prob (Callable): Vectorised log-probability function.
+        log_prob_group1 (jnp.ndarray): Log probabilities of the first group with shape ``(n_chains_per_group,)``.
         stretch (float): Stretch parameter; must be greater than or equal to ``1``.
 
     Returns:
-        Tuple[jnp.ndarray, jnp.ndarray]: Proposed positions and log acceptance
-        probabilities for each chain.
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]: Proposed positions, log acceptance
+        probabilities, and proposed log probabilities for each chain.
     """
     n_chains_per_group = int(group1.shape[0])
 
@@ -47,6 +49,7 @@ def side_move(
 
     group1_proposed = group1 + stretch * z * (xj - xk)
 
-    log_accept_prob = log_prob(group1_proposed) - log_prob(group1)
+    log_prob_group1_proposed = log_prob(group1_proposed)
+    log_accept_prob = log_prob_group1_proposed - log_prob_group1
     
-    return group1_proposed, log_accept_prob
+    return group1_proposed, log_accept_prob, log_prob_group1_proposed

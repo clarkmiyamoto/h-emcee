@@ -7,6 +7,7 @@ from hemcee.moves.hamiltonian.hmc import hmc_move
 from hemcee.adaptation.adapter import select_adapter, Adapter
 from hemcee.adaptation.dual_averaging import DAParameters
 from hemcee.adaptation.chees import ChEESParameters
+from hemcee.adaptation.reasonable_stepsize import find_reasonable_step_size
 from hemcee.backend.backend import Backend
 
 class HamiltonianSampler(BaseSampler):
@@ -119,6 +120,8 @@ class HamiltonianSampler(BaseSampler):
                                        show_progress)
             print('Warmup complete.')
 
+
+
         # Main sampling
         # Statically sets step size & integration length from warmup
         step_size, L = self.adapter.finalize(self.adapter_state)
@@ -151,7 +154,7 @@ class HamiltonianSampler(BaseSampler):
             jnp.ndarray: Post-warmup ensemble state.
         """
         def body(carry, keys):
-            group1, adapter_state, diagnostics = carry
+            group1, log_prob1, adapter_state, diagnostics = carry
 
             #### Group 1 Update
             # Update group 1 using HMC move
@@ -164,10 +167,12 @@ class HamiltonianSampler(BaseSampler):
                 keys[0],
                 self.log_prob, 
                 self.grad_log_prob, 
+                log_prob1
             )
 
             #### Accept proposal?
             group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob, keys[1])
+            log_prob1, _ = accept_proposal(log_prob1, proposed_log_prob, log_accept_prob, keys[1])
             
             #### Adaptation
             adapter_state_new = adapter.update(
@@ -177,33 +182,32 @@ class HamiltonianSampler(BaseSampler):
                 position_proposed=group1_proposed,
                 momentum_proposed=momentum_proposed,
                 group2=None,
-                integration_time_jittered=step_size * L)
-            step_size_new, L_new = adapter.value(adapter_state_new)
+                jitter=1)
             
             #### Construct return state
             new_diagnostics = {
                 'accepts': diagnostics['accepts'] + accept1,
             }
             
-            # Compute log probabilities for current state
-            log_prob_group1 = self.log_prob(group1)
-            
-            return (group1, adapter_state_new, new_diagnostics), (group1, log_prob_group1, accept1)
+            return (group1, log_prob1, adapter_state_new, new_diagnostics), (group1, log_prob1, accept1)
         
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
         }
         
+        # Initialize log probabilities
+        log_prob1 = self.log_prob(group1)
+        
         n_keys = 2
         keys = jax.random.split(key, n_keys * warmup).reshape(warmup, n_keys, 2)
         
         carry, self.backend = batched_scan(body, 
-                             init_carry=(group1, self.adapter_state, diagnostics), 
+                             init_carry=(group1, log_prob1, self.adapter_state, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size, 
                              backend=self.backend,
                              show_progress=show_progress)
-        group1, adapter_state_final, diagnostics = carry
+        group1, log_prob1, adapter_state_final, diagnostics = carry
 
         #### Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / warmup
@@ -245,7 +249,7 @@ class HamiltonianSampler(BaseSampler):
         # Sampling Loop Body
         ########################################################
         def body(carry, keys):
-            group1, diagnostics = carry
+            group1, log_prob1, diagnostics = carry
 
             #### Group 1 Update
             # Update group 1 using HMC move
@@ -253,9 +257,11 @@ class HamiltonianSampler(BaseSampler):
                 step_size, inv_mass_matrix, L,
                 keys[0], 
                 self.log_prob, self.grad_log_prob, 
+                log_prob1
             )
             #### Accept proposal?
             group1, accepts = accept_proposal(group1, group1_proposed, log_accept_prob, keys[1])
+            log_prob1, _ = accept_proposal(log_prob1, proposed_log_prob, log_accept_prob, keys[1])
 
             #### Diagnostics
             new_diagnostics = {
@@ -263,25 +269,25 @@ class HamiltonianSampler(BaseSampler):
             }
             
             #### Construct return state
-            # Compute log probabilities for current state
-            log_prob_group1 = self.log_prob(group1)
-            
-            return (group1, new_diagnostics), (group1, log_prob_group1, accepts)
+            return (group1, log_prob1, new_diagnostics), (group1, log_prob1, accepts)
         
         diagnostics = {
             'accepts': jnp.zeros(self.total_chains),
         }
+        
+        # Initialize log probabilities
+        log_prob1 = self.log_prob(group1)
         n_keys_per_iter = 2
         total_samples = num_samples * thin_by
         keys = jax.random.split(key, n_keys_per_iter * total_samples).reshape(total_samples, n_keys_per_iter, 2)
 
         carry, self.backend = batched_scan(body, 
-                             init_carry=(group1, diagnostics), 
+                             init_carry=(group1, log_prob1, diagnostics), 
                              xs=keys, 
                              batch_size=batch_size,
                              backend=self.backend, 
                              show_progress=show_progress)
-        group1, diagnostics = carry
+        group1, log_prob1, diagnostics = carry
 
         # Logging
         diagnostics['acceptance_rate'] = diagnostics['accepts'] / total_samples

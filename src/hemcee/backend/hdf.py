@@ -128,7 +128,8 @@ class HDFBackend(Backend):
             )
     
     def get_value(self, 
-                  key: str, 
+                  key: str,
+                  flat: bool = False,  
                   thin: int = 1, 
                   discard: int = 0):
         '''

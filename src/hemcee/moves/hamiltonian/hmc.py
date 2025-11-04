@@ -10,6 +10,7 @@ def hmc_move(
     key: jax.random.PRNGKey,
     log_prob: Callable,
     grad_log_prob: Callable,
+    log_prob_group1: jnp.ndarray,
 ):
     """Regular Hamiltonian Monte Carlo move.
 
@@ -41,7 +42,7 @@ def hmc_move(
         grad_log_prob, 
     )
 
-    current_U = -1 * log_prob(group1) # Shape (n_chains_per_group,)
+    current_U = -1 * log_prob_group1 # Shape (n_chains_per_group,)
     current_K = 0.5 * jnp.sum(momentum * (momentum @ inv_mass_matrix), axis=1) # Shape (n_chains_per_group,)
 
     proposed_log_prob = log_prob(group1_proposed)
@@ -49,6 +50,8 @@ def hmc_move(
     proposed_K = 0.5 * jnp.sum(momentum_proposed * (momentum_proposed @ inv_mass_matrix), axis=1) # Shape (n_chains_per_group,)
 
     dH = (proposed_U + proposed_K) - (current_U + current_K)
+    dH = jnp.where(jnp.isnan(dH), jnp.inf, dH)
+    
     log_accept_prob1 = jnp.minimum(0.0, -dH)
 
     return group1_proposed, log_accept_prob1, momentum_proposed, proposed_log_prob

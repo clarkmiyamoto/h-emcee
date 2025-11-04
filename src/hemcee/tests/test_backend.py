@@ -33,6 +33,6 @@ def test_iterations(backend: Backend):
 
     assert samples.shape == (num_samples, total_chains, dim), 'Outputted shape is wrong'
 
-    assert sampler.backend.iteration == (warmup + num_samples * thin_by)
+    assert sampler.backend.iteration == (warmup + num_samples * thin_by), 'Iteration count is wrong'
 
 

@@ -85,7 +85,7 @@ class ChEESAdapter(Adapter):
                position_proposed: jnp.ndarray,
                momentum_proposed: jnp.ndarray,
                group2: jnp.ndarray,
-               integration_time_jittered: float) -> ChEESState:
+               jitter: float) -> ChEESState:
         """
         Update integration time using ChEES.
         
@@ -96,7 +96,7 @@ class ChEESAdapter(Adapter):
             position_proposed: Shape (num_walkers, dim)
             momentum_proposed: Shape (num_walkers, dim)
             group2: Shape (walkers_group2, dim)
-            integration_time_jittered: t_n = jitter * integration_time.
+            jitter: .
                 Meaning you ran leapfrog for $L = round(t_n / step_size)$ steps
         """    
         acceptance_prob = jnp.clip(jnp.exp(log_accept_rate), 0.0, 1.0) # Shape (batch_size,)
@@ -110,7 +110,7 @@ class ChEESAdapter(Adapter):
         diff_sqnorm = jnp.sum(centered_proposed**2, axis=1) - jnp.sum(centered_previous**2, axis=1) # Shape ()
 
         # Computes gradient signal according to O(n) invariant inner product or by affine invariant inner product
-        g_m = integration_time_jittered * diff_sqnorm * self.innerproduct(centered_proposed, group2, momentum_proposed)
+        g_m = jitter * diff_sqnorm * self.innerproduct(centered_proposed, group2, momentum_proposed)
         # Filter out gradients from extreme cases
         g_m = jnp.where(acceptance_prob > 1e-4, g_m, 0.0)
         g_m = jnp.where(jnp.isfinite(g_m), g_m, 0.0)
