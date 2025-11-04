@@ -6,10 +6,8 @@ from abc import ABC
 from typing import Callable
 import jax
 import jax.numpy as jnp
-import warnings
 import hemcee
 from hemcee.backend.backend import Backend
-import arviz as az
 
 class BaseSampler(ABC):
     """Base class for MCMC samplers with common functionality.
@@ -102,9 +100,3 @@ class BaseSampler(ABC):
     def get_autocorr(self, discard, thin):
         x = self.get_chain(discard=discard, thin=thin, flat=False)
         return hemcee.autocorr.integrated_time(x)
-
-    def print_summary(self):
-        samples = self.get_chain()
-        samples = samples.transpose(1, 0, 2)
-        idata = az.from_dict(posterior={"x": samples})
-        idata.print
