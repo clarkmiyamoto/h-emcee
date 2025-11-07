@@ -1,17 +1,18 @@
-'''
-Code from https://github.com/dfm/emcee/blob/main/src/emcee/autocorr.py
-Ported to JAX.
-'''
 import jax
 import jax.numpy as jnp
 
-def next_pow_two(n):
+__all__ = ["function_1d", "integrated_time", "AutocorrError"]
+
+
+def next_pow_two(n: int) -> int:
     """Returns the next power of two greater than or equal to `n`"""
-    i = jax.lax.while_loop(lambda i: i < n, lambda i: i << 1, 1)
+    i = 1
+    while i < n:
+        i = i << 1
     return i
 
 
-def function_1d(x):
+def function_1d(x: jnp.ndarray) -> jnp.ndarray:
     """Estimate the normalized autocorrelation function of a 1-D series
 
     Args:
@@ -33,9 +34,11 @@ def function_1d(x):
     return acf
 
 
-def auto_window(taus, c):
+def auto_window(taus: jnp.ndarray, c) -> float:
     m = jnp.arange(len(taus)) < c * taus
-    return jax.lax.cond(jnp.any(m), lambda _: jnp.argmin(m), lambda _: len(taus) - 1, operand=None)
+    if jnp.any(m):
+        return jnp.argmin(m)
+    return len(taus) - 1
 
 
 def integrated_time(x, c=5, tol=50, quiet=False, has_walkers=True):
@@ -46,7 +49,7 @@ def integrated_time(x, c=5, tol=50, quiet=False, has_walkers=True):
     determine a reasonable window size.
 
     Args:
-        x (jnp.ndarray): The time series. If 2-dimensional, the array
+        x (numpy.ndarray): The time series. If 2-dimensional, the array
             dimesions are interpreted as ``(n_step, n_walker)`` unless
             ``has_walkers==False``, in which case they are interpreted as
             ``(n_step, n_param)``. If 3-dimensional, the dimensions are
@@ -73,44 +76,29 @@ def integrated_time(x, c=5, tol=50, quiet=False, has_walkers=True):
 
     """
     x = jnp.atleast_1d(x)
-    if len(x.shape) == 1:
-        x = x[:, jnp.newaxis, jnp.newaxis]
-    if len(x.shape) == 2:
+    if x.ndim == 1:
+        x = jnp.expand_dims(x, axis=(1, 2))
+    elif x.ndim == 2:
         if not has_walkers:
-            x = x[:, jnp.newaxis, :]
+            x = jnp.expand_dims(x, axis=1)
         else:
-            x = x[:, :, jnp.newaxis]
+            x = jnp.expand_dims(x, axis=2)
     if len(x.shape) != 3:
         raise ValueError("invalid dimensions")
 
-    n_t, n_w, n_d = x.shape
-    
-    # Vectorized computation of autocorrelation functions for all walkers and parameters
-    # Reshape x to (n_t, n_w * n_d) to process all combinations at once
-    x_reshaped = x.reshape(n_t, n_w * n_d)
-    
-    # Compute autocorrelation functions for all walker-parameter combinations
-    # This replaces the nested loops over k and d
-    def compute_acf_for_all(x_flat):
-        return jax.vmap(function_1d)(x_flat.T).T  # Apply function_1d to each column
-    
-    acf_all = compute_acf_for_all(x_reshaped)
-    
-    # Reshape back to (n_t, n_w, n_d) and average over walkers
-    acf_all = acf_all.reshape(n_t, n_w, n_d)
-    f_avg = jnp.mean(acf_all, axis=1)  # Average over walkers: (n_t, n_d)
-    
-    # Compute cumulative sums and tau estimates for all parameters at once
-    taus = 2.0 * jnp.cumsum(f_avg, axis=0) - 1.0  # (n_t, n_d)
-    
-    # Vectorized window computation for all parameters
-    def compute_window_for_param(taus_param):
-        return auto_window(taus_param, c)
-    
-    windows = jax.vmap(compute_window_for_param)(taus.T)  # Apply to each parameter
-    
-    # Extract tau estimates using the computed windows
-    tau_est = jnp.array([taus[windows[d], d] for d in range(n_d)])
+    n_t, n_w, n_d = x.shape # (num_steps, num_walkers, num_dim)
+    tau_est = jnp.empty(n_d)
+    windows = jnp.empty(n_d, dtype=int)
+
+    # Loop over parameters
+    for d in range(n_d):
+        z = x[:, :, d]                       # (n_t, n_w)
+        out = jax.vmap(function_1d, in_axes=1)(z)  # (n_w, n_t)
+        f = out.mean(axis=0)                 # (n_t,)
+
+        taus = 2.0 * jnp.cumsum(f) - 1.0
+        windows = windows.at[d].set(auto_window(taus, c))
+        tau_est = tau_est.at[d].set(taus[windows[d]])
 
     # Check convergence
     flag = tol * tau_est > n_t
@@ -125,6 +113,7 @@ def integrated_time(x, c=5, tol=50, quiet=False, has_walkers=True):
         msg += "N/{0} = {1:.0f};\ntau: {2}".format(tol, n_t / tol, tau_est)
         if not quiet:
             raise AutocorrError(tau_est, msg)
+        print(msg)
 
     return tau_est
 
