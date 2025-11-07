@@ -65,15 +65,15 @@ class CompositeAdapter(Adapter):
         """Return (step_size, integration_time) tuple."""
         step_size, _ = self.da_adapter.value(state.da_state)
         T = self.chees_adapter._get_T(state.chees_state)
-        integration_length = jnp.maximum(jnp.round(T/step_size), 1)
+        integration_length = jnp.maximum(jnp.ceil(T/step_size), 1)
         integration_length = jnp.astype(integration_length, int)
         return (step_size, integration_length)
     
     def finalize(self, state: CompositeState) -> tuple[float, float]:
         """Return final (step_size, integration_time) tuple."""
         step_size, _ = self.da_adapter.finalize(state.da_state)
-        T = self.chees_adapter._get_T(state.chees_state)
-        integration_length = jnp.maximum(jnp.round(T/step_size), 1)
+        T = self.chees_adapter._get_T(state.chees_state, bar=True)
+        integration_length = jnp.maximum(jnp.ceil(T/step_size), 1)
         integration_length = jnp.astype(integration_length, int)
         return (step_size, integration_length)
 

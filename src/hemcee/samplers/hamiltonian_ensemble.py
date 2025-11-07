@@ -179,8 +179,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
                 position_current = group1,
                 position_proposed = group1_proposed,
                 momentum_proposed = momentum_projected_1,
-                group2=group2,
-                jitter = 1) # TODO: implement jitter
+                group2=group2)
             
             group1, accept1 = accept_proposal(group1, group1_proposed, log_accept_prob_1, keys[1])
             log_prob1, _ = accept_proposal(log_prob1, proposed_log_prob_1, log_accept_prob_1, keys[1])
@@ -200,8 +199,7 @@ class HamiltonianEnsembleSampler(BaseSampler):
                 position_current = group2,
                 position_proposed = group2_proposed,
                 momentum_proposed = momentum_projected_2,
-                group2=group1,
-                jitter = 1) # Implement jitter
+                group2=group1)
             
             group2, accept2 = accept_proposal(group2, group2_proposed, log_accept_prob_2, keys[3])
             log_prob2, _ = accept_proposal(log_prob2, proposed_log_prob_2, log_accept_prob_2, keys[3])
