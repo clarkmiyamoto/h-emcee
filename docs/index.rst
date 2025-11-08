@@ -25,13 +25,15 @@ All you need is access to the unnormalized log probability!
 
    def log_prob(x):
       return -0.5 * jnp.sum(x ** 2)
+   
+   key = jax.random.PRNGKey(0)
+   keys = jax.random.split(key, 2)
 
    num_walkers, dim = 100, 5
-   key = jax.random.PRNGKey(0)
-   inital_states = jax.random.normal(key, shape=(num_walkers, dim))
+   inital_states = jax.random.normal(keys[0], shape=(num_walkers, dim))
 
    sampler = hemcee.HamiltonianEnsembleSampler(num_walkers, dim, log_prob)
-   sampler.run_mcmc(inital_states, 10000)
+   sampler.run_mcmc(keys[1], inital_states, 10000)
 
 For a more through example, see :doc:`tutorials/quickstart`.
 
